@@ -5,6 +5,7 @@ import pathlib
 import pytest
 
 import ghrel.cli
+import ghrel.errors
 import ghrel.packages
 
 
@@ -17,7 +18,7 @@ def test_run_prune_errors_on_missing_packages_dir(
 
     cmd = ghrel.cli.Prune(dry_run=False, verbose=False)
 
-    with pytest.raises(ghrel.cli.ConfigError, match="does not exist"):
+    with pytest.raises(ghrel.errors.ConfigError, match="does not exist"):
         ghrel.cli.run_prune(cmd)
 
 
