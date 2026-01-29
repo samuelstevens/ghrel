@@ -1,0 +1,52 @@
+[project]
+name = "ghrel"
+version = "0.1.0"
+description = "A minimal package manager for installing and updating binaries from GitHub releases"
+readme = "README.md"
+authors = [
+    { name = "Samuel Stevens", email = "samuel.robert.stevens@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "beartype>=0.18.0",
+    "filelock>=3.13.0",
+    "requests>=2.31.0",
+    "tyro>=0.9.0",
+]
+
+[project.scripts]
+ghrel = "ghrel.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+    "pytest-timeout>=2.2.0",
+    "ruff>=0.8.0",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+timeout = 30
