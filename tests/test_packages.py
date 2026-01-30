@@ -44,3 +44,24 @@ def test_load_packages_archive_false_allows_missing_binary(
 
     packages = ghrel.packages.load_packages(packages_dpath)
     assert packages["tool"].binary is None
+
+
+def test_load_packages_loads_ghrel_hooks(tmp_path: pathlib.Path) -> None:
+    """load_packages loads ghrel_post_install and ghrel_verify hooks."""
+    packages_dpath = tmp_path / "packages"
+    packages_dpath.mkdir()
+    (packages_dpath / "tool.py").write_text(
+        "pkg = 'owner/repo'\n"
+        "binary = 'tool'\n"
+        "\n"
+        "def ghrel_post_install(*, version, binary_name, binary_path, checksum, pkg, bin_dir, extracted_dir):\n"
+        "    pass\n"
+        "\n"
+        "def ghrel_verify(*, version, binary_name, binary_path, checksum, pkg):\n"
+        "    pass\n"
+    )
+
+    packages = ghrel.packages.load_packages(packages_dpath)
+    config = packages["tool"]
+    assert config.post_install is not None
+    assert config.verify is not None
