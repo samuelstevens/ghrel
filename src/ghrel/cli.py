@@ -164,11 +164,6 @@ def run_sync(cmd: Sync) -> None:
                 _print_plan(plan, dry_run=False)
                 continue
 
-            pre_install_err = _run_pre_install(package, plan)
-            if pre_install_err:
-                failures.append((name, pre_install_err))
-                continue
-
             try:
                 install_result = ghrel.install.install_release_asset(
                     package,
@@ -432,39 +427,25 @@ def _print_warning(name: str, reason: str) -> None:
 
 
 @beartype.beartype
-def _run_pre_install(
-    package: ghrel.packages.PackageConfig, plan: PackagePlan
-) -> str | None:
-    """Run pre_install hook if present."""
-    if package.pre_install is None:
-        return None
-
-    previous_version = plan.current_version
-    try:
-        package.pre_install(
-            plan.desired_version, plan.install_fpath.parent, previous_version
-        )
-    except Exception as err:
-        return f"pre_install failed: {err}"
-
-    return None
-
-
 @beartype.beartype
 def _run_post_install(
     package: ghrel.packages.PackageConfig,
     plan: PackagePlan,
     install_result: ghrel.install.InstallResult,
 ) -> str | None:
-    """Run post_install hook if present."""
+    """Run ghrel_post_install hook if present."""
     if package.post_install is None:
         return None
 
     try:
         package.post_install(
-            install_result.extracted_dpath,
-            plan.install_fpath.parent,
-            plan.desired_version,
+            version=plan.desired_version,
+            binary_name=plan.install_fpath.name,
+            binary_path=plan.install_fpath,
+            checksum=install_result.package_state.checksum,
+            pkg=package.pkg,
+            bin_dir=plan.install_fpath.parent,
+            extracted_dir=install_result.extracted_dpath,
         )
     except Exception as err:
         return f"post_install failed: {err}"

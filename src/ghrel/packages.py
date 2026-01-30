@@ -12,10 +12,37 @@ import beartype
 
 import ghrel.errors
 
-PreInstallHook = collections.abc.Callable[[str, pathlib.Path, str | None], None]
-PostInstallHook = collections.abc.Callable[
-    [pathlib.Path | None, pathlib.Path, str], None
-]
+
+@tp.runtime_checkable
+class PostInstallHook(tp.Protocol):
+    """Signature for ghrel_post_install hook."""
+
+    def __call__(
+        self,
+        *,
+        version: str,
+        binary_name: str,
+        binary_path: pathlib.Path,
+        checksum: str,
+        pkg: str,
+        bin_dir: pathlib.Path,
+        extracted_dir: pathlib.Path | None,
+    ) -> None: ...
+
+
+@tp.runtime_checkable
+class VerifyHook(tp.Protocol):
+    """Signature for ghrel_verify hook."""
+
+    def __call__(
+        self,
+        *,
+        version: str,
+        binary_name: str,
+        binary_path: pathlib.Path,
+        checksum: str,
+        pkg: str,
+    ) -> None: ...
 
 
 @beartype.beartype
@@ -44,11 +71,11 @@ class PackageConfig:
     archive: bool
     """Whether the asset is an archive."""
 
-    pre_install: PreInstallHook | None
-    """Hook called before install."""
-
     post_install: PostInstallHook | None
     """Hook called after install."""
+
+    verify: VerifyHook | None
+    """Hook called to verify the installed binary."""
 
     package_fpath: pathlib.Path
     """Absolute path to the package file."""
@@ -125,12 +152,12 @@ def _load_package(package_fpath: pathlib.Path) -> PackageConfig:
     asset = _get_optional_attr(module, "asset", str, package_fpath, default=None)
     version = _get_optional_attr(module, "version", str, package_fpath, default=None)
 
-    pre_install_raw = _get_optional_callable_attr(module, "pre_install", package_fpath)
-    pre_install = tp.cast(PreInstallHook | None, pre_install_raw)
     post_install_raw = _get_optional_callable_attr(
-        module, "post_install", package_fpath
+        module, "ghrel_post_install", package_fpath
     )
     post_install = tp.cast(PostInstallHook | None, post_install_raw)
+    verify_raw = _get_optional_callable_attr(module, "ghrel_verify", package_fpath)
+    verify = tp.cast(VerifyHook | None, verify_raw)
 
     return PackageConfig(
         name=name,
@@ -140,8 +167,8 @@ def _load_package(package_fpath: pathlib.Path) -> PackageConfig:
         asset=asset,
         version=version,
         archive=archive,
-        pre_install=pre_install,
         post_install=post_install,
+        verify=verify,
         package_fpath=package_fpath,
     )
 

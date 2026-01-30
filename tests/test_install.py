@@ -36,8 +36,8 @@ def test_get_install_as_prefers_install_as(tmp_path: pathlib.Path) -> None:
         asset=None,
         version=None,
         archive=True,
-        pre_install=None,
         post_install=None,
+        verify=None,
         package_fpath=tmp_path / "tool.py",
     )
     asset = ghrel.github.ReleaseAsset(name="tool.tar.gz", url="https://example.com")
@@ -54,8 +54,8 @@ def test_get_install_as_uses_binary_basename(tmp_path: pathlib.Path) -> None:
         asset=None,
         version=None,
         archive=True,
-        pre_install=None,
         post_install=None,
+        verify=None,
         package_fpath=tmp_path / "tool.py",
     )
     asset = ghrel.github.ReleaseAsset(name="tool.tar.gz", url="https://example.com")
@@ -72,8 +72,8 @@ def test_get_install_as_archive_false_uses_asset_name(tmp_path: pathlib.Path) ->
         asset=None,
         version=None,
         archive=False,
-        pre_install=None,
         post_install=None,
+        verify=None,
         package_fpath=tmp_path / "tool.py",
     )
     asset = ghrel.github.ReleaseAsset(
@@ -92,8 +92,8 @@ def test_select_asset_pattern(tmp_path: pathlib.Path) -> None:
         asset="*linux*",
         version=None,
         archive=True,
-        pre_install=None,
         post_install=None,
+        verify=None,
         package_fpath=tmp_path / "tool.py",
     )
     assets = (
@@ -115,8 +115,8 @@ def test_select_asset_pattern_ambiguous(tmp_path: pathlib.Path) -> None:
         asset="*linux*",
         version=None,
         archive=True,
-        pre_install=None,
         post_install=None,
+        verify=None,
         package_fpath=tmp_path / "tool.py",
     )
     assets = (
@@ -138,8 +138,8 @@ def test_select_asset_platform(tmp_path: pathlib.Path) -> None:
         asset=None,
         version=None,
         archive=True,
-        pre_install=None,
         post_install=None,
+        verify=None,
         package_fpath=tmp_path / "tool.py",
     )
     assets = (
