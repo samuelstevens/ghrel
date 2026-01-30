@@ -166,3 +166,61 @@ def test_run_sync_post_install_sees_extracted_dir(
     output = capsys.readouterr().out
     assert "post_install failed" not in output
     assert "verify failed" not in output
+
+
+def test_run_sync_verifies_up_to_date_package(
+    tmp_path: pathlib.Path, monkeypatch
+) -> None:
+    """run_sync runs ghrel_verify for up-to-date packages."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    monkeypatch.setenv("GHREL_BIN", str(tmp_path / "bin"))
+    monkeypatch.setenv("GHREL_NO_TOKEN_WARNING", "1")
+
+    packages_dpath = tmp_path / "ghrel" / "packages"
+    packages_dpath.mkdir(parents=True)
+    marker_fpath = tmp_path / "verify-called"
+    (packages_dpath / "tool.py").write_text(
+        "pkg = 'owner/repo'\n"
+        "binary = 'tool'\n"
+        "asset = 'tool.tar.gz'\n"
+        f"MARKER_FPATH = {str(marker_fpath)!r}\n"
+        "\n"
+        "def ghrel_verify(*, version, binary_name, binary_path, checksum, pkg):\n"
+        "    import pathlib\n"
+        "    pathlib.Path(MARKER_FPATH).write_text('ok')\n"
+    )
+
+    bin_dpath = tmp_path / "bin"
+    bin_dpath.mkdir(parents=True)
+    binary_fpath = bin_dpath / "tool"
+    binary_fpath.write_text("binary")
+    checksum = ghrel.install.compute_sha256(binary_fpath)
+
+    state = ghrel.state.State(
+        packages={
+            "tool": ghrel.state.PackageState(
+                version="v1",
+                checksum=checksum,
+                installed_at="2024-01-01T00:00:00Z",
+                binary_fpath=binary_fpath,
+            )
+        }
+    )
+    ghrel.state.write_state(state)
+
+    release = ghrel.github.Release(
+        tag="v1",
+        assets=(ghrel.github.ReleaseAsset(name="tool.tar.gz", url="https://e"),),
+    )
+
+    def fake_get_latest_release(self, pkg: str) -> ghrel.github.Release:
+        return release
+
+    monkeypatch.setattr(
+        ghrel.github.GitHubClient, "get_latest_release", fake_get_latest_release
+    )
+
+    cmd = ghrel.cli.Sync(packages_dpath=packages_dpath, dry_run=False, verbose=False)
+    ghrel.cli.run_sync(cmd)
+    assert marker_fpath.exists()
