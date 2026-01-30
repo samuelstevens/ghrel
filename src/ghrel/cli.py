@@ -4,6 +4,7 @@ import dataclasses
 import os
 import pathlib
 import sys
+import tempfile
 import typing as tp
 
 import beartype
@@ -164,24 +165,31 @@ def run_sync(cmd: Sync) -> None:
                 _print_plan(plan, dry_run=False)
                 continue
 
-            try:
-                install_result = ghrel.install.install_release_asset(
-                    package,
-                    plan.release,
-                    plan.asset,
-                    bin_dpath,
-                    client,
-                )
-            except ghrel.errors.GhrelError as err:
-                failures.append((name, str(err)))
-                continue
-            except Exception as err:
-                failures.append((name, f"Unexpected error: {err}"))
-                continue
-            post_install_err = _run_post_install(package, plan, install_result)
-            if post_install_err:
-                failures.append((name, post_install_err))
-                continue
+            install_result: ghrel.install.InstallResult | None = None
+            with tempfile.TemporaryDirectory(prefix="ghrel-") as temp_dpath_str:
+                temp_dpath = pathlib.Path(temp_dpath_str)
+                try:
+                    install_result = ghrel.install.install_release_asset(
+                        package,
+                        plan.release,
+                        plan.asset,
+                        bin_dpath,
+                        client,
+                        temp_dpath=temp_dpath,
+                    )
+                except ghrel.errors.GhrelError as err:
+                    failures.append((name, str(err)))
+                    continue
+                except Exception as err:
+                    failures.append((name, f"Unexpected error: {err}"))
+                    continue
+
+                post_install_err = _run_post_install(package, plan, install_result)
+                if post_install_err:
+                    failures.append((name, post_install_err))
+                    continue
+
+            assert install_result is not None
 
             verify_missing = package.verify is None
             verify_err = _run_verify(package, plan, install_result)

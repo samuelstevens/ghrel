@@ -73,37 +73,47 @@ def install_release_asset(
     asset: ghrel.github.ReleaseAsset,
     bin_dpath: pathlib.Path,
     client: ghrel.github.GitHubClient,
+    temp_dpath: pathlib.Path | None = None,
 ) -> InstallResult:
     """Download, extract, and install a release asset."""
     bin_dpath.mkdir(parents=True, exist_ok=True)
 
-    with tempfile.TemporaryDirectory(prefix="ghrel-") as temp_dpath_str:
-        temp_dpath = pathlib.Path(temp_dpath_str)
-        asset_fpath = temp_dpath / asset.name
-        client.download_asset(asset.url, asset_fpath)
+    if temp_dpath is None:
+        with tempfile.TemporaryDirectory(prefix="ghrel-") as temp_dpath_str:
+            return install_release_asset(
+                package,
+                release,
+                asset,
+                bin_dpath,
+                client,
+                temp_dpath=pathlib.Path(temp_dpath_str),
+            )
 
-        extracted_dpath: pathlib.Path | None = None
-        source_fpath = asset_fpath
-        if package.archive:
-            extracted_dpath = temp_dpath / "extract"
-            ghrel.archive.extract_archive(asset_fpath, extracted_dpath)
-            source_fpath = _find_binary(extracted_dpath, package.binary, asset_fpath)
+    assert temp_dpath is not None
+    temp_dpath.mkdir(parents=True, exist_ok=True)
+    asset_fpath = temp_dpath / asset.name
+    client.download_asset(asset.url, asset_fpath)
 
-        install_as = get_install_as(package, asset)
-        dest_fpath = bin_dpath / install_as
-        checksum = _install_binary(source_fpath, dest_fpath)
+    extracted_dpath: pathlib.Path | None = None
+    source_fpath = asset_fpath
+    if package.archive:
+        extracted_dpath = temp_dpath / "extract"
+        ghrel.archive.extract_archive(asset_fpath, extracted_dpath)
+        source_fpath = _find_binary(extracted_dpath, package.binary, asset_fpath)
 
-        installed_at = _get_utc_now()
-        package_state = ghrel.state.PackageState(
-            version=release.tag,
-            checksum=checksum,
-            installed_at=installed_at,
-            binary_fpath=dest_fpath,
-        )
+    install_as = get_install_as(package, asset)
+    dest_fpath = bin_dpath / install_as
+    checksum = _install_binary(source_fpath, dest_fpath)
 
-        return InstallResult(
-            package_state=package_state, extracted_dpath=extracted_dpath
-        )
+    installed_at = _get_utc_now()
+    package_state = ghrel.state.PackageState(
+        version=release.tag,
+        checksum=checksum,
+        installed_at=installed_at,
+        binary_fpath=dest_fpath,
+    )
+
+    return InstallResult(package_state=package_state, extracted_dpath=extracted_dpath)
 
 
 @beartype.beartype
