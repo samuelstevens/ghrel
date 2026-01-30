@@ -162,6 +162,11 @@ def run_sync(cmd: Sync) -> None:
                 continue
 
             if plan.action == "up_to_date":
+                assert plan.current_state is not None
+                verify_err = _run_verify_existing(package, plan, plan.current_state)
+                if verify_err:
+                    failures.append((name, verify_err))
+                    continue
                 _print_plan(plan, dry_run=False)
                 continue
 
@@ -492,6 +497,30 @@ def _run_verify(
             binary_name=plan.install_fpath.name,
             binary_path=plan.install_fpath,
             checksum=install_result.package_state.checksum,
+            pkg=package.pkg,
+        )
+    except Exception as err:
+        return f"verify failed: {err}"
+
+    return None
+
+
+@beartype.beartype
+def _run_verify_existing(
+    package: ghrel.packages.PackageConfig,
+    plan: PackagePlan,
+    current_state: ghrel.state.PackageState,
+) -> str | None:
+    """Run ghrel_verify hook for an existing install if present."""
+    if package.verify is None:
+        return None
+
+    try:
+        package.verify(
+            version=plan.desired_version,
+            binary_name=plan.install_fpath.name,
+            binary_path=plan.install_fpath,
+            checksum=current_state.checksum,
             pkg=package.pkg,
         )
     except Exception as err:
