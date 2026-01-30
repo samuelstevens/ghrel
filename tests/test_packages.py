@@ -2,9 +2,6 @@
 
 import pathlib
 
-import pytest
-
-import ghrel.errors
 import ghrel.packages
 
 

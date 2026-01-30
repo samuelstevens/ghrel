@@ -2,8 +2,8 @@
 
 import hashlib
 import pathlib
-import tempfile
 import tarfile
+import tempfile
 
 import hypothesis
 import hypothesis.strategies as st

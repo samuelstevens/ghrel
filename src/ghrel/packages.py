@@ -125,10 +125,7 @@ def _load_package(package_fpath: pathlib.Path) -> PackageConfig:
 
     binary = _get_optional_attr(module, "binary", str, package_fpath, default=None)
     if archive and binary is None:
-        raise ghrel.errors.ConfigError(
-            message=f"Missing required attribute 'binary' in {package_fpath}",
-            path=package_fpath,
-        )
+        binary = name
 
     install_as = _get_optional_attr(
         module, "install_as", str, package_fpath, default=None

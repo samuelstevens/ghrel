@@ -208,10 +208,9 @@ def _find_binary(
         if binary_fpath.exists():
             return binary_fpath
         entries = ghrel.archive.list_archive_entries(archive_fpath)
-        entries_str = _format_archive_entries(entries)
         raise ghrel.errors.GhrelError(
             message=f"Binary '{binary}' not found in archive for {archive_fpath}",
-            hint=entries_str,
+            hint=_make_binary_not_found_hint(binary, entries),
         )
 
     root_candidate = extracted_dpath / binary
@@ -221,10 +220,9 @@ def _find_binary(
     matches = [match for match in extracted_dpath.rglob(binary) if match.is_file()]
     if not matches:
         entries = ghrel.archive.list_archive_entries(archive_fpath)
-        entries_str = _format_archive_entries(entries)
         raise ghrel.errors.GhrelError(
             message=f"Binary '{binary}' not found in archive for {archive_fpath}",
-            hint=entries_str,
+            hint=_make_binary_not_found_hint(binary, entries),
         )
 
     if len(matches) > 1:
@@ -284,3 +282,14 @@ def _format_archive_entries(entries: tuple[str, ...]) -> str:
         return "Archive contents: (empty)"
     lines = "\n  - ".join(entries)
     return f"Archive contents:\n  - {lines}"
+
+
+@beartype.beartype
+def _make_binary_not_found_hint(binary: str, entries: tuple[str, ...]) -> str:
+    """Build a hint with archive contents and explicit path guidance."""
+    entries_str = _format_archive_entries(entries)
+    suggestion = (
+        f'Set binary to an explicit path like "<dir>/{binary}"; '
+        f'you can use a wildcard like "<dir>*/{binary}" to avoid version pinning.'
+    )
+    return f"{entries_str}\n{suggestion}"
