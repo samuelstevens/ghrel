@@ -65,7 +65,7 @@ src/ghrel/
 ### Error Handling
 
 - **Error model**: Exceptions with try/catch at package-processing boundary
-- **Package file load errors**: Exit early on `SyntaxError`, `ImportError`, or `AttributeError` (missing required attributes). Required: `pkg` always, `binary` when `archive=True` (default). These indicate broken config files that need user attention.
+- **Package file load errors**: Exit early on `SyntaxError`, `ImportError`, or `AttributeError` (missing required attributes). Only `pkg` is required. These indicate broken config files that need user attention.
 - **Hook errors**: `ghrel_post_install`/`ghrel_verify` exceptions are per-package failures - continue processing other packages, report in summary. Binary remains installed but state is not updated (next sync will retry).
 - **Network/processing errors**: Continue to next package, collect failures for summary
 - **Corrupted state file**: Fail with error, don't auto-recover (let user decide)
@@ -264,13 +264,14 @@ Error: Multiple assets match pattern '*linux*' for sharkdp/fd v10.2.0:
   - fd-v10.2.0-x86_64-unknown-linux-musl.tar.gz
   Hint: Make your pattern more specific (e.g., '*linux*musl*')
 
-# Binary not found in archive
+# Binary not found in archive (binary defaults to package name if not specified)
 Error: Binary 'fd' not found in archive for sharkdp/fd v10.2.0
   Archive contents:
     fd-v10.2.0-x86_64-unknown-linux-gnu/
     fd-v10.2.0-x86_64-unknown-linux-gnu/fd
     fd-v10.2.0-x86_64-unknown-linux-gnu/README.md
-  Hint: Use explicit path: binary = "fd-v10.2.0-x86_64-unknown-linux-gnu/fd"
+  Hint: Set binary = "fd-v10.2.0-x86_64-unknown-linux-gnu/fd"
+  Hint: Use wildcards for version independence: binary = "fd-*-x86_64-unknown-linux-gnu/fd"
 ```
 
 ## File Structure

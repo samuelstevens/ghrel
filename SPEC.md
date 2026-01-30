@@ -41,10 +41,11 @@ Use `install_as` to override the installed name if it should differ from the pac
 ### Minimal Package
 
 ```python
-# fd.py
-pkg = "sharkdp/fd"
-binary = "fd"
+# jj.py
+pkg = "jj-vcs/jj"
 ```
+
+When `binary` is omitted, ghrel looks for an executable named `jj` (the package filename) in the archive. If not found, it lists the archive contents to help you set `binary` explicitly.
 
 ### Full Package (all options)
 
@@ -84,7 +85,7 @@ def ghrel_verify(*, version, binary_name, binary_path, checksum, pkg):
 | Attribute | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `pkg` | `str` | Yes | - | GitHub repo in `owner/repo` format |
-| `binary` | `str` | Yes* | - | Executable path in archive (filename or explicit path like `fd-v10/fd`). *Ignored when `archive = False`. |
+| `binary` | `str` | No | package name | Executable path in archive (filename or explicit path like `fd-v10/fd`). Ignored when `archive = False`. |
 | `install_as` | `str` | No | package filename stem | Installed binary name (overrides the default) |
 | `asset` | `str` | No | auto-detect | Glob pattern to match release asset filename |
 | `version` | `str` | No | latest | Exact version tag to pin |
@@ -288,7 +289,14 @@ When `archive = False`:
 
 ## Binary Detection
 
-The `binary` attribute specifies which executable to extract from the archive.
+The `binary` attribute specifies which executable to extract from the archive. If omitted, defaults to the package filename (e.g., `jj.py` → look for `jj`).
+
+**Default** - package name:
+```python
+# jj.py
+pkg = "jj-vcs/jj"
+# binary defaults to "jj"
+```
 
 **Simple case** - just the filename:
 ```python
@@ -303,9 +311,9 @@ binary = "fd-v10.2.0-x86_64-unknown-linux-gnu/fd"
 Search order for simple filenames:
 1. Root of archive for exact filename match
 2. Any subdirectory for exact filename match
-3. Fails if not found (no guessing)
+3. Fails with error listing archive contents (helps user set `binary` explicitly)
 
-**Multiple matches**: If a simple filename matches multiple files in the archive, ghrel fails with an error. Use an explicit path to disambiguate.
+**Multiple matches**: If a simple filename matches multiple files in the archive, ghrel fails with an error listing matches. Use an explicit path to disambiguate.
 
 ## Permissions
 

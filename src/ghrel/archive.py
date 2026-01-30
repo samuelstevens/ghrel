@@ -66,7 +66,7 @@ def _extract_tar(
                     hint="Archive contains path traversal entries.",
                 )
 
-        tar.extractall(dest_dpath)
+        tar.extractall(dest_dpath, filter="data")
 
     for extracted_fpath in dest_dpath.rglob("*"):
         extracted.append(extracted_fpath)
