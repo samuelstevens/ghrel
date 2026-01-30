@@ -1,6 +1,9 @@
 """Tests for CLI module."""
 
+import io
 import pathlib
+import shutil
+import tarfile
 
 import pytest
 
@@ -101,3 +104,65 @@ def test_run_verify_calls_hook(tmp_path: pathlib.Path) -> None:
     assert calls["binary_path"] == plan.install_fpath
     assert calls["checksum"] == "sha256:abc123"
     assert calls["pkg"] == "owner/repo"
+
+
+def test_run_sync_post_install_sees_extracted_dir(
+    tmp_path: pathlib.Path, monkeypatch, capsys
+) -> None:
+    """run_sync keeps extracted_dir for post_install and cleans before verify."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    monkeypatch.setenv("GHREL_BIN", str(tmp_path / "bin"))
+    monkeypatch.setenv("GHREL_NO_TOKEN_WARNING", "1")
+
+    packages_dpath = tmp_path / "ghrel" / "packages"
+    packages_dpath.mkdir(parents=True)
+    (packages_dpath / "tool.py").write_text(
+        "import pathlib\n"
+        "pkg = 'owner/repo'\n"
+        "binary = 'tool'\n"
+        "asset = 'tool.tar.gz'\n"
+        "EXTRACTED_DIR = None\n"
+        "\n"
+        "def ghrel_post_install(*, version, binary_name, binary_path, checksum, pkg, "
+        "bin_dir, extracted_dir):\n"
+        "    global EXTRACTED_DIR\n"
+        "    EXTRACTED_DIR = extracted_dir\n"
+        "    assert extracted_dir is not None\n"
+        "    assert extracted_dir.exists()\n"
+        "\n"
+        "def ghrel_verify(*, version, binary_name, binary_path, checksum, pkg):\n"
+        "    assert EXTRACTED_DIR is not None\n"
+        "    assert not EXTRACTED_DIR.exists()\n"
+    )
+
+    archive_fpath = tmp_path / "tool.tar.gz"
+    with tarfile.open(archive_fpath, "w:gz") as tar:
+        payload = b"binary"
+        info = tarfile.TarInfo("tool")
+        info.size = len(payload)
+        tar.addfile(info, io.BytesIO(payload))
+
+    release = ghrel.github.Release(
+        tag="v1",
+        assets=(ghrel.github.ReleaseAsset(name="tool.tar.gz", url="https://e"),),
+    )
+
+    def fake_get_latest_release(self, pkg: str) -> ghrel.github.Release:
+        return release
+
+    def fake_download_asset(self, url: str, dest_fpath: pathlib.Path) -> None:
+        shutil.copy(archive_fpath, dest_fpath)
+
+    monkeypatch.setattr(
+        ghrel.github.GitHubClient, "get_latest_release", fake_get_latest_release
+    )
+    monkeypatch.setattr(
+        ghrel.github.GitHubClient, "download_asset", fake_download_asset
+    )
+
+    cmd = ghrel.cli.Sync(packages_dpath=packages_dpath, dry_run=False, verbose=False)
+    ghrel.cli.run_sync(cmd)
+    output = capsys.readouterr().out
+    assert "post_install failed" not in output
+    assert "verify failed" not in output
