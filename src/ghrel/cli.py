@@ -163,11 +163,10 @@ def run_sync(cmd: Sync) -> None:
 
             if plan.action == "up_to_date":
                 assert plan.current_state is not None
-                verify_err = _run_verify_existing(package, plan, plan.current_state)
-                if verify_err:
-                    failures.append((name, verify_err))
-                    continue
-                _print_plan(plan, dry_run=False)
+                verify_status, _ = _get_verify_status_existing(
+                    package, plan, plan.current_state, failures
+                )
+                _print_plan(plan, dry_run=False, verify_status=verify_status)
                 continue
 
             install_result: ghrel.install.InstallResult | None = None
@@ -196,16 +195,16 @@ def run_sync(cmd: Sync) -> None:
 
             assert install_result is not None
 
-            verify_missing = package.verify is None
-            verify_err = _run_verify(package, plan, install_result)
-            if verify_err:
-                failures.append((name, verify_err))
+            verify_status, verify_failed = _get_verify_status_new(
+                package, plan, install_result, failures
+            )
+            if verify_failed:
+                _print_plan(plan, dry_run=False, verify_status=verify_status)
                 continue
 
             state_packages[name] = install_result.package_state
             ghrel.state.write_state(ghrel.state.State(packages=state_packages))
-
-            _print_plan(plan, dry_run=False, verify_missing=verify_missing)
+            _print_plan(plan, dry_run=False, verify_status=verify_status)
 
         if failures:
             print("")
@@ -397,11 +396,14 @@ def _make_plan(
 
 @beartype.beartype
 def _print_plan(
-    plan: PackagePlan, *, dry_run: bool, verify_missing: bool = False
+    plan: PackagePlan, *, dry_run: bool, verify_status: str | None = None
 ) -> None:
     """Print status for a package plan."""
     if plan.action == "up_to_date":
-        print(f"{plan.name}: ok (up to date)")
+        line = f"{plan.name}: ok (up to date)"
+        if verify_status and not dry_run:
+            line = f"{line} ({verify_status})"
+        print(line)
         return
 
     if plan.action == "install":
@@ -419,12 +421,8 @@ def _print_plan(
     else:
         line = f"{plan.name}: {plan.desired_version}"
 
-    if (
-        verify_missing
-        and not dry_run
-        and plan.action in {"install", "update", "reinstall"}
-    ):
-        line = f"{line} (no verify hook)"
+    if verify_status and not dry_run:
+        line = f"{line} ({verify_status})"
 
     print(line)
     if not dry_run:
@@ -455,6 +453,48 @@ def _print_warning(name: str, reason: str) -> None:
 
 
 @beartype.beartype
+def _get_verify_status_existing(
+    package: ghrel.packages.PackageConfig,
+    plan: PackagePlan,
+    current_state: ghrel.state.PackageState,
+    failures: list[tuple[str, str]],
+) -> tuple[str, bool]:
+    """Return verify status string and whether verify failed for existing installs."""
+    if package.verify is None:
+        return "no verify hook", False
+
+    verify_err = _run_verify_existing(package, plan, current_state)
+    if verify_err is not None:
+        err_detail = verify_err if verify_err else "assertion failed"
+        message = f"verify failed: {err_detail}"
+        failures.append((plan.name, message))
+        return message, True
+
+    return "verified", False
+
+
+@beartype.beartype
+def _get_verify_status_new(
+    package: ghrel.packages.PackageConfig,
+    plan: PackagePlan,
+    install_result: ghrel.install.InstallResult,
+    failures: list[tuple[str, str]],
+) -> tuple[str, bool]:
+    """Return verify status string and whether verify failed for new installs."""
+    if package.verify is None:
+        return "no verify hook", False
+
+    verify_err = _run_verify(package, plan, install_result)
+    if verify_err is not None:
+        err_detail = verify_err if verify_err else "assertion failed"
+        message = f"verify failed: {err_detail}"
+        failures.append((plan.name, message))
+        return message, True
+
+    return "verified", False
+
+
+@beartype.beartype
 @beartype.beartype
 def _run_post_install(
     package: ghrel.packages.PackageConfig,
@@ -468,8 +508,8 @@ def _run_post_install(
     try:
         package.post_install(
             version=plan.desired_version,
-            binary_name=plan.install_fpath.name,
-            binary_path=plan.install_fpath,
+            bin_name=plan.install_fpath.name,
+            bin_path=plan.install_fpath,
             checksum=install_result.package_state.checksum,
             pkg=package.pkg,
             bin_dir=plan.install_fpath.parent,
@@ -494,13 +534,10 @@ def _run_verify(
     try:
         package.verify(
             version=plan.desired_version,
-            binary_name=plan.install_fpath.name,
-            binary_path=plan.install_fpath,
-            checksum=install_result.package_state.checksum,
-            pkg=package.pkg,
+            bin_name=plan.install_fpath.name,
         )
     except Exception as err:
-        return f"verify failed: {err}"
+        return str(err)
 
     return None
 
@@ -518,13 +555,10 @@ def _run_verify_existing(
     try:
         package.verify(
             version=plan.desired_version,
-            binary_name=plan.install_fpath.name,
-            binary_path=plan.install_fpath,
-            checksum=current_state.checksum,
-            pkg=package.pkg,
+            bin_name=plan.install_fpath.name,
         )
     except Exception as err:
-        return f"verify failed: {err}"
+        return str(err)
 
     return None
 

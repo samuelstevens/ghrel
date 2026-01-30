@@ -60,10 +60,9 @@ asset = "*x86_64*linux*musl*.tar.gz"   # glob pattern for asset selection (optio
 version = "14.1.0"                     # pin to exact version (optional, default: latest)
 archive = True                         # whether asset is an archive (optional, default: True)
 
-def ghrel_post_install(*, version, binary_name, binary_path, checksum, pkg, bin_dir, extracted_dir):
+def ghrel_post_install(*, version: str, bin_name: str, bin_path: Path, checksum: str, pkg: str, bin_dir: Path, extracted_dir: Path):
     """Called after binary is installed, before verify. Optional."""
     import shutil
-    from pathlib import Path
 
     # Install shell completions from the extracted archive
     completions = extracted_dir / "complete" / "_rg"
@@ -72,10 +71,10 @@ def ghrel_post_install(*, version, binary_name, binary_path, checksum, pkg, bin_
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(completions, dest)
 
-def ghrel_verify(*, version, binary_name, binary_path, checksum, pkg):
+def ghrel_verify(*, version: str, bin_name: str):
     """Called after post_install to verify the binary works. Optional but recommended."""
     # Run binary from PATH (not absolute path) to verify PATH is set up correctly
-    result = subprocess.run([binary_name, "--version"], capture_output=True, text=True)
+    result = subprocess.run([bin_name, "--version"], capture_output=True, text=True)
     assert result.returncode == 0, f"exit code {result.returncode}"
     assert "ripgrep" in result.stdout, f"expected 'ripgrep' in output"
 ```
@@ -97,16 +96,16 @@ Hooks use the `ghrel_` prefix and receive typed keyword arguments.
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `ghrel_post_install` | `(*, version, binary_name, binary_path, checksum, pkg, bin_dir, extracted_dir)` | Called after binary is installed, before verify |
-| `ghrel_verify` | `(*, version, binary_name, binary_path, checksum, pkg)` | Called after post_install to verify installation works |
+| `ghrel_post_install` | `(*, version: str, bin_name: str, bin_path: Path, checksum: str, pkg: str, bin_dir: Path, extracted_dir: Path)` | Called after binary is installed, before verify |
+| `ghrel_verify` | `(*, version: str, bin_name: str)` | Called after post_install to verify installation works |
 
 **Hook arguments**:
 
 | Argument | Type | Description |
 |----------|------|-------------|
 | `version` | `str` | Version being installed (e.g., `"10.2.0"`) |
-| `binary_name` | `str` | Name of the installed binary (matches package filename stem) |
-| `binary_path` | `Path` | Absolute path to the installed binary |
+| `bin_name` | `str` | Name of the installed binary (matches package filename stem) |
+| `bin_path` | `Path` | Absolute path to the installed binary |
 | `checksum` | `str` | SHA-256 checksum with `sha256:` prefix |
 | `pkg` | `str` | GitHub repo in `owner/repo` format |
 | `bin_dir` | `Path` | Directory where binary was installed |
@@ -116,11 +115,11 @@ Hooks use the `ghrel_` prefix and receive typed keyword arguments.
 
 **Hook failure behavior**:
 - **ghrel_post_install failure**: Chain stops, `ghrel_verify` does not run. Binary remains installed but state is not updated (next sync will retry).
-- **ghrel_verify failure**: Binary remains installed but state is not updated (next sync will retry). Just the exception message is shown.
-- **Missing ghrel_verify**: Warning shown inline (e.g., `fd: installed 10.2.0 (no verify hook)`).
+- **ghrel_verify failure**: Binary remains installed but state is not updated (next sync will retry). Exception message shown inline.
+- **Missing ghrel_verify**: Soft warning shown inline on every sync (e.g., `fd: ok (no verify hook)`). Does not affect exit code.
 
 **Verify hook guidelines**:
-- Run the binary from PATH (e.g., `subprocess.run([binary_name, "--version"])`) rather than using the absolute path. This verifies PATH is configured correctly.
+- Run the binary from PATH (e.g., `subprocess.run([bin_name, "--version"])`) rather than using the absolute path. This verifies PATH is configured correctly.
 - Raise an exception (e.g., `AssertionError`) on failure with a descriptive message.
 - Verify runs on fresh installs, updates, and when a package is already up to date.
 
@@ -141,7 +140,8 @@ Behavior:
 - Upgrades packages where installed version differs from desired (latest or pinned)
 - Verifies checksums of installed binaries (re-downloads if mismatch detected)
 - Re-downloads if binary file is missing (warns about state drift)
-- Runs `ghrel_verify` even when a package is already up to date (if a verify hook is defined)
+- Runs `ghrel_verify` on every sync (installs, updates, and up-to-date packages)
+- Shows `(no verify hook)` warning for packages without `ghrel_verify` on every sync
 - **Warns** about orphaned binaries (installed but no package file) - use `ghrel prune` to remove
 - Continues on error - failures are reported in summary at end
 
@@ -382,17 +382,21 @@ ghrel sync
 ⚠ No GITHUB_TOKEN set. API rate limited to 60 requests/hour.
   Set GITHUB_TOKEN to increase limit to 5,000/hour.
 
-fd: 9.0.0 → 10.2.0
-fzf: ✓ (up to date)
-ripgrep: installed 14.1.0
+fd: ok (verified)
+fzf: ok (no verify hook)
+ripgrep: installed 14.1.0 (verified)
+lazygit: installed 0.40.0 (no verify hook)
 bat: ⚠ orphan (use 'ghrel prune' to remove)
 delta: ⚠ binary missing, re-downloading
 
 ✗ 1 failed:
-  jq: ambiguous asset match (2 assets matched '*linux*'):
-      - jq-linux-amd64
-      - jq-linux-arm64
+  jq: installed 1.7.1 (verify failed: expected 'jq' in output)
 ```
+
+**Verify status** is always shown:
+- `(verified)` - verify hook ran and passed
+- `(no verify hook)` - package has no `ghrel_verify` function (soft warning, doesn't affect exit code)
+- `(verify failed: <message>)` - verify hook raised an exception
 
 ## Error Handling
 
@@ -452,12 +456,14 @@ install_as = "tailwindcss"
 ### With completions (fd)
 
 ```python
+import subprocess
+from pathlib import Path
+
 pkg = "sharkdp/fd"
 binary = "fd-*-aarch64-apple-darwin/fd"
 
-def ghrel_post_install(*, version, binary_name, binary_path, checksum, pkg, bin_dir, extracted_dir):
+def ghrel_post_install(*, version: str, bin_name: str, bin_path: Path, checksum: str, pkg: str, bin_dir: Path, extracted_dir: Path):
     import shutil
-    from pathlib import Path
 
     # fd includes completions in autocomplete/
     src = extracted_dir / "autocomplete" / "_fd"
@@ -466,9 +472,8 @@ def ghrel_post_install(*, version, binary_name, binary_path, checksum, pkg, bin_
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(src, dest)
 
-def ghrel_verify(*, version, binary_name, binary_path, checksum, pkg):
-    import subprocess
-    result = subprocess.run([binary_name, "--version"], capture_output=True, text=True)
+def ghrel_verify(*, version: str, bin_name: str):
+    result = subprocess.run([bin_name, "--version"], capture_output=True, text=True)
     assert result.returncode == 0
     assert "fd" in result.stdout
 ```

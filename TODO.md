@@ -2,13 +2,12 @@
 
 Note: use [done] as a prefix for completed items.
 
-1. [done] Align hook API with SPEC/IMPLEMENTATION: load `ghrel_post_install` and `ghrel_verify` (keyword-only args) instead of `pre_install`/`post_install`, or update docs to match current hook names/signatures.
-2. Fix hook execution order to match docs: install -> ghrel_post_install (with extracted_dir still present) -> cleanup -> ghrel_verify -> write state.
-3. Ensure state is only written after hooks succeed (currently state is written before post_install and there is no verify hook).
-4. Restore default install naming to package filename stem (and use `install_as` to override), not binary basename/asset name.
-5. [done] Add missing verify-hook warning output ("installed ... (no verify hook)") and ensure verify runs on both install and update.
-6. Implement verbose mode and download progress behavior described in IMPLEMENTATION.md, or update docs to match current output.
-7. Update `ghrel list` output to include pinned status (and confirm how to detect pinned versions while staying offline) or adjust docs.
-8. Normalize CLI output strings and warning labels to match SPEC examples (ok vs checkmark, orphan/warn wording).
-9. Align error messages/hints with documented examples (version-not-found hint about v prefix, ambiguous asset listing format, binary-not-found hint to use explicit path).
-10. Make `binary` attribute optional - default to package filename stem. On failure, list archive contents and suggest explicit path with wildcard hint for version independence.
+1. Align install naming with SPEC: default installed name and hook binary_name should be the package filename stem; only install_as should override; for archive = False do not default to asset filename.
+2. Implement verbose output and download progress from IMPLEMENTATION.md (TTY spinner with percentage; non-TTY line logging), or update docs to match current behavior.
+3. Update `ghrel list` output to include pinned status based on package files while keeping the command offline, or update SPEC.
+4. Align CLI interface with IMPLEMENTATION.md (CLI dataclass with command field) or update docs to match the current tyro usage.
+5. Normalize CLI output strings and warnings to match SPEC examples (ok vs checkmark, orphan/warn wording, and no-verify-hook messaging for up-to-date packages).
+6. Align error messages and hints with documented examples (version-not-found hint about v prefix, ambiguous asset listing format, binary-not-found archive listing/hints).
+7. Update IMPLEMENTATION.md module structure to include `errors.py` and `py.typed`, or adjust code/docs to be consistent.
+8. Add missing tests/fixtures listed in IMPLEMENTATION.md (for example `tests/test_github.py` and `tests/fixtures/packages/`), or update docs.
+9. Add `ty` to dev dependencies or update IMPLEMENTATION.md to reflect current tooling.

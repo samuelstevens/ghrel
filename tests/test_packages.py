@@ -53,11 +53,11 @@ def test_load_packages_loads_ghrel_hooks(tmp_path: pathlib.Path) -> None:
         "pkg = 'owner/repo'\n"
         "binary = 'tool'\n"
         "\n"
-        "def ghrel_post_install(*, version, binary_name, binary_path, checksum, pkg, "
+        "def ghrel_post_install(*, version, bin_name, bin_path, checksum, pkg, "
         "bin_dir, extracted_dir):\n"
         "    pass\n"
         "\n"
-        "def ghrel_verify(*, version, binary_name, binary_path, checksum, pkg):\n"
+        "def ghrel_verify(*, version, bin_name):\n"
         "    pass\n"
     )
 

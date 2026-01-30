@@ -104,7 +104,7 @@ src/ghrel/
   - `ghrel_post_install` failure: Chain stops, verify doesn't run, state not updated
   - `ghrel_verify` failure: State not updated (next sync will retry)
   - Just exception message shown (not full traceback)
-- **Missing `ghrel_verify`**: Warning shown per-package (e.g., `fd: installed 10.2.0 (no verify hook)`)
+- **Missing `ghrel_verify`**: Soft warning shown inline on every sync (e.g., `fd: ok (no verify hook)`). Does not affect exit code.
 - **Verify guidelines**: Run binary from PATH (not absolute path) to verify PATH setup is correct
 - **Verify on up-to-date**: Verify runs even when a package is already up to date
 

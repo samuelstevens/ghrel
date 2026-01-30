@@ -21,8 +21,8 @@ class PostInstallHook(tp.Protocol):
         self,
         *,
         version: str,
-        binary_name: str,
-        binary_path: pathlib.Path,
+        bin_name: str,
+        bin_path: pathlib.Path,
         checksum: str,
         pkg: str,
         bin_dir: pathlib.Path,
@@ -38,10 +38,7 @@ class VerifyHook(tp.Protocol):
         self,
         *,
         version: str,
-        binary_name: str,
-        binary_path: pathlib.Path,
-        checksum: str,
-        pkg: str,
+        bin_name: str,
     ) -> None: ...
 
 
