@@ -3,6 +3,7 @@
 import hashlib
 import pathlib
 import tempfile
+import tarfile
 
 import hypothesis
 import hypothesis.strategies as st
@@ -150,3 +151,26 @@ def test_select_asset_platform(tmp_path: pathlib.Path) -> None:
     release = ghrel.github.Release(tag="v1", assets=assets)
     selected = ghrel.install.select_asset(package, release, "linux", "x86_64")
     assert selected.name == "tool-linux-amd64.tar.gz"
+
+
+def test_find_binary_error_includes_archive_contents_and_wildcard_hint(
+    tmp_path: pathlib.Path,
+) -> None:
+    """_find_binary error includes archive contents and wildcard suggestion."""
+    extracted_dpath = tmp_path / "extracted"
+    extracted_dpath.mkdir()
+    (extracted_dpath / "other").write_text("nope")
+
+    archive_fpath = tmp_path / "tool.tar.gz"
+    with tarfile.open(archive_fpath, "w:gz") as tar:
+        info = tarfile.TarInfo("other")
+        info.size = 0
+        tar.addfile(info)
+
+    with pytest.raises(ghrel.errors.GhrelError) as err:
+        ghrel.install._find_binary(extracted_dpath, "tool", archive_fpath)
+
+    err_str = str(err.value)
+    assert "Archive contents:" in err_str
+    assert "wildcard" in err_str
+    assert "*" in err_str

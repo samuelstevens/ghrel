@@ -24,14 +24,16 @@ def test_list_package_names_with_files(tmp_path: pathlib.Path) -> None:
     assert names == {"fd", "ripgrep"}
 
 
-def test_load_packages_missing_binary_raises(tmp_path: pathlib.Path) -> None:
-    """load_packages raises when binary missing for archive packages."""
+def test_load_packages_defaults_binary_to_package_name(
+    tmp_path: pathlib.Path,
+) -> None:
+    """load_packages defaults binary to package filename when missing."""
     packages_dpath = tmp_path / "packages"
     packages_dpath.mkdir()
     (packages_dpath / "tool.py").write_text("pkg = 'owner/repo'\n")
 
-    with pytest.raises(ghrel.errors.ConfigError, match="binary"):
-        ghrel.packages.load_packages(packages_dpath)
+    packages = ghrel.packages.load_packages(packages_dpath)
+    assert packages["tool"].binary == "tool"
 
 
 def test_load_packages_archive_false_allows_missing_binary(
