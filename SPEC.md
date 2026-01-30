@@ -45,7 +45,7 @@ Use `install_as` to override the installed name if it should differ from the pac
 pkg = "jj-vcs/jj"
 ```
 
-When `binary` is omitted, ghrel looks for an executable named `jj` (the package filename) in the archive. If not found, it lists the archive contents to help you set `binary` explicitly.
+When `binary` is omitted, ghrel looks for an executable named `jj` (the package filename) in the archive. If not found, it lists the archive contents and suggests using an explicit path (including a wildcard to avoid version pinning).
 
 ### Full Package (all options)
 
@@ -122,7 +122,7 @@ Hooks use the `ghrel_` prefix and receive typed keyword arguments.
 **Verify hook guidelines**:
 - Run the binary from PATH (e.g., `subprocess.run([binary_name, "--version"])`) rather than using the absolute path. This verifies PATH is configured correctly.
 - Raise an exception (e.g., `AssertionError`) on failure with a descriptive message.
-- Verify runs on both fresh installs and updates.
+- Verify runs on fresh installs, updates, and when a package is already up to date.
 
 ## CLI Commands
 
@@ -141,6 +141,7 @@ Behavior:
 - Upgrades packages where installed version differs from desired (latest or pinned)
 - Verifies checksums of installed binaries (re-downloads if mismatch detected)
 - Re-downloads if binary file is missing (warns about state drift)
+- Runs `ghrel_verify` even when a package is already up to date (if a verify hook is defined)
 - **Warns** about orphaned binaries (installed but no package file) - use `ghrel prune` to remove
 - Continues on error - failures are reported in summary at end
 
@@ -311,7 +312,7 @@ binary = "fd-v10.2.0-x86_64-unknown-linux-gnu/fd"
 Search order for simple filenames:
 1. Root of archive for exact filename match
 2. Any subdirectory for exact filename match
-3. Fails with error listing archive contents (helps user set `binary` explicitly)
+3. Fails with error listing archive contents and suggesting an explicit path (wildcards allowed)
 
 **Multiple matches**: If a simple filename matches multiple files in the archive, ghrel fails with an error listing matches. Use an explicit path to disambiguate.
 

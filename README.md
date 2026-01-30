@@ -7,3 +7,7 @@ ghrel is a simple tool for writing your own packages, using pre-compiled binarie
 Package files are written in Python.
 
 **You write your own package files.**
+
+Notes:
+- `binary` defaults to the package filename stem when omitted (for archive assets).
+- `ghrel_verify` runs on fresh installs, updates, and when a package is already up to date.

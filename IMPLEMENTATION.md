@@ -106,6 +106,7 @@ src/ghrel/
   - Just exception message shown (not full traceback)
 - **Missing `ghrel_verify`**: Warning shown per-package (e.g., `fd: installed 10.2.0 (no verify hook)`)
 - **Verify guidelines**: Run binary from PATH (not absolute path) to verify PATH setup is correct
+- **Verify on up-to-date**: Verify runs even when a package is already up to date
 
 ### Platform Detection
 
@@ -145,6 +146,8 @@ src/ghrel/
 
 ### Binary Search Order
 
+If `binary` is omitted, default it to the package filename stem.
+
 For simple `binary = "name"` (no path separator):
 1. Look for exact filename match in archive root
 2. Look for exact filename match in any subdirectory
@@ -173,6 +176,7 @@ On each sync, for each package:
 2. If missing: warn about state drift, re-download
 3. If present: compute SHA-256 checksum, compare against stored `checksum`
 4. If mismatch: re-download and reinstall (binary may have been modified externally)
+5. Run `ghrel_verify` when defined, even if the package is already up to date
 
 ## Testing Strategy
 
