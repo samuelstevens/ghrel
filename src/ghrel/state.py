@@ -11,6 +11,8 @@ import tempfile
 import beartype
 import filelock
 
+import ghrel.errors
+
 
 @beartype.beartype
 @dataclasses.dataclass(frozen=True)
@@ -37,10 +39,6 @@ class State:
 
     packages: dict[str, PackageState] = dataclasses.field(default_factory=dict)
     """Map from package name (stem of .py file) to its state."""
-
-
-class LockError(Exception):
-    """Raised when unable to acquire state lock."""
 
 
 @beartype.beartype
@@ -75,9 +73,7 @@ def acquire_lock() -> collections.abc.Iterator[None]:
     try:
         lock.acquire(timeout=0)
     except filelock.Timeout:
-        raise LockError(
-            f"Another ghrel process is running. If not, delete {lock_fpath}"
-        ) from None
+        raise ghrel.errors.LockError.make(lock_fpath) from None
 
     try:
         yield
@@ -93,14 +89,21 @@ def read_state() -> State:
         return State()
 
     text = state_fpath.read_text()
-    data = json.loads(text)
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as err:
+        raise ghrel.errors.StateError.make(
+            f"Invalid JSON in state file: {err}", state_fpath
+        ) from None
 
     packages = {}
+    required_keys = ("version", "checksum", "installed_at", "binary_path")
     for name, pkg_data in data.get("packages", {}).items():
-        assert "version" in pkg_data, f"Missing 'version' for package {name}"
-        assert "checksum" in pkg_data, f"Missing 'checksum' for package {name}"
-        assert "installed_at" in pkg_data, f"Missing 'installed_at' for package {name}"
-        assert "binary_path" in pkg_data, f"Missing 'binary_path' for package {name}"
+        for key in required_keys:
+            if key not in pkg_data:
+                raise ghrel.errors.StateError.make(
+                    f"Missing '{key}' for package '{name}'", state_fpath, name
+                )
 
         packages[name] = PackageState(
             version=pkg_data["version"],

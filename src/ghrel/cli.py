@@ -1,6 +1,7 @@
 """CLI definition using tyro."""
 
 import dataclasses
+import os
 import pathlib
 import sys
 import typing as tp
@@ -8,7 +9,11 @@ import typing as tp
 import beartype
 import tyro
 
+import ghrel.errors
+import ghrel.github
+import ghrel.install
 import ghrel.packages
+import ghrel.platform
 import ghrel.state
 
 
@@ -49,6 +54,23 @@ class Prune:
 
 
 @beartype.beartype
+@dataclasses.dataclass(frozen=True)
+class PackagePlan:
+    """Resolved plan for a single package."""
+
+    name: str
+    package: ghrel.packages.PackageConfig
+    current_state: ghrel.state.PackageState | None
+    current_version: str | None
+    desired_version: str
+    release: ghrel.github.Release
+    asset: ghrel.github.ReleaseAsset
+    install_fpath: pathlib.Path
+    action: str
+    reason: str | None
+
+
+@beartype.beartype
 def run_list(cmd: List) -> None:
     """Run the list command."""
     state = ghrel.state.read_state()
@@ -69,8 +91,113 @@ def run_list(cmd: List) -> None:
         print(f"{name:<{max_name_len}}  {pkg.version}{status}")
 
 
-class ConfigError(Exception):
-    """Raised when configuration is missing or invalid."""
+@beartype.beartype
+def run_sync(cmd: Sync) -> None:
+    """Run the sync command."""
+    packages_dpath = cmd.packages_dpath or ghrel.packages.get_packages_dpath()
+    if not packages_dpath.exists():
+        raise ghrel.errors.ConfigError(
+            message=f"Packages directory does not exist: {packages_dpath}",
+            hint=f"Create it with: mkdir -p {packages_dpath}",
+            path=packages_dpath,
+        )
+
+    packages = ghrel.packages.load_packages(packages_dpath)
+    if not packages:
+        print("No packages found.")
+        with ghrel.state.acquire_lock():
+            state = ghrel.state.read_state()
+            orphans = list(state.packages)
+            for name in sorted(orphans):
+                print(f"{name}: WARN orphan (use 'ghrel prune' to remove)")
+        return
+
+    token = os.environ.get("GITHUB_TOKEN")
+    if not token and os.environ.get("GHREL_NO_TOKEN_WARNING") != "1":
+        print("Warning: No GITHUB_TOKEN set. API rate limited to 60 requests/hour.")
+        print("  Set GITHUB_TOKEN to increase limit to 5,000/hour.")
+        print("")
+
+    os_name = ghrel.platform.get_os()
+    arch = ghrel.platform.get_arch()
+    client = ghrel.github.GitHubClient(token=token)
+    bin_dpath = ghrel.install.get_bin_dpath()
+
+    failures: list[tuple[str, str]] = []
+
+    with ghrel.state.acquire_lock():
+        state = ghrel.state.read_state()
+        state_packages = dict(state.packages)
+
+        orphans = [name for name in state_packages if name not in packages]
+        for name in sorted(orphans):
+            print(f"{name}: WARN orphan (use 'ghrel prune' to remove)")
+
+        for name in sorted(packages):
+            package = packages[name]
+            try:
+                plan = _make_plan(
+                    package,
+                    state_packages.get(name),
+                    client,
+                    os_name,
+                    arch,
+                    bin_dpath,
+                )
+            except ghrel.errors.AuthError:
+                raise
+            except ghrel.errors.GhrelError as err:
+                failures.append((name, str(err)))
+                continue
+            except Exception as err:
+                failures.append((name, f"Unexpected error: {err}"))
+                continue
+
+            if plan.reason:
+                _print_warning(plan.name, plan.reason)
+
+            if cmd.dry_run:
+                _print_plan(plan, dry_run=True)
+                continue
+
+            if plan.action == "up_to_date":
+                _print_plan(plan, dry_run=False)
+                continue
+
+            pre_install_err = _run_pre_install(package, plan)
+            if pre_install_err:
+                failures.append((name, pre_install_err))
+                continue
+
+            try:
+                install_result = ghrel.install.install_release_asset(
+                    package,
+                    plan.release,
+                    plan.asset,
+                    bin_dpath,
+                    client,
+                )
+            except ghrel.errors.GhrelError as err:
+                failures.append((name, str(err)))
+                continue
+            except Exception as err:
+                failures.append((name, f"Unexpected error: {err}"))
+                continue
+
+            state_packages[name] = install_result.package_state
+            ghrel.state.write_state(ghrel.state.State(packages=state_packages))
+
+            _print_plan(plan, dry_run=False)
+
+            post_install_err = _run_post_install(package, plan, install_result)
+            if post_install_err:
+                failures.append((name, post_install_err))
+
+        if failures:
+            print("")
+            print(f"Failed: {len(failures)} package(s)")
+            for name, message in failures:
+                print(f"  {name}: {message}")
 
 
 @beartype.beartype
@@ -78,7 +205,11 @@ def run_prune(cmd: Prune) -> None:
     """Run the prune command."""
     packages_dpath = ghrel.packages.get_packages_dpath()
     if not packages_dpath.exists():
-        raise ConfigError(f"Packages directory does not exist: {packages_dpath}")
+        raise ghrel.errors.ConfigError(
+            message=f"Packages directory does not exist: {packages_dpath}",
+            hint=f"Create it with: mkdir -p {packages_dpath}",
+            path=packages_dpath,
+        )
 
     package_names = ghrel.packages.list_package_names()
 
@@ -127,12 +258,226 @@ def main() -> None:
 
     try:
         match command:
-            case Sync():
-                print("sync not implemented yet")
+            case Sync() as cmd:
+                run_sync(cmd)
             case List() as cmd:
                 run_list(cmd)
             case Prune() as cmd:
                 run_prune(cmd)
-    except (ghrel.state.LockError, ConfigError) as err:
+    except (
+        ghrel.errors.AuthError,
+        ghrel.errors.ConfigError,
+        ghrel.errors.PlatformError,
+        ghrel.errors.StateError,
+        ghrel.errors.LockError,
+    ) as err:
         print(f"Error: {err}", file=sys.stderr)
         sys.exit(1)
+
+
+@beartype.beartype
+def _make_plan(
+    package: ghrel.packages.PackageConfig,
+    current_state: ghrel.state.PackageState | None,
+    client: ghrel.github.GitHubClient,
+    os_name: str,
+    arch: str,
+    bin_dpath: pathlib.Path,
+) -> PackagePlan:
+    """Resolve the desired version, asset, and install action."""
+    release = (
+        client.get_release_by_tag(package.pkg, package.version)
+        if package.version
+        else client.get_latest_release(package.pkg)
+    )
+    desired_version = release.tag
+    asset = ghrel.install.select_asset(package, release, os_name, arch)
+    install_as = ghrel.install.get_install_as(package, asset)
+    install_fpath = bin_dpath / install_as
+
+    if current_state is None:
+        return PackagePlan(
+            name=package.name,
+            package=package,
+            current_state=current_state,
+            current_version=None,
+            desired_version=desired_version,
+            release=release,
+            asset=asset,
+            install_fpath=install_fpath,
+            action="install",
+            reason=None,
+        )
+
+    current_version = current_state.version
+    if current_state.binary_fpath != install_fpath:
+        return PackagePlan(
+            name=package.name,
+            package=package,
+            current_state=current_state,
+            current_version=current_version,
+            desired_version=desired_version,
+            release=release,
+            asset=asset,
+            install_fpath=install_fpath,
+            action="reinstall",
+            reason="binary_path_changed",
+        )
+
+    if current_version != desired_version:
+        return PackagePlan(
+            name=package.name,
+            package=package,
+            current_state=current_state,
+            current_version=current_version,
+            desired_version=desired_version,
+            release=release,
+            asset=asset,
+            install_fpath=install_fpath,
+            action="update",
+            reason=None,
+        )
+
+    if not current_state.binary_fpath.exists():
+        return PackagePlan(
+            name=package.name,
+            package=package,
+            current_state=current_state,
+            current_version=current_version,
+            desired_version=desired_version,
+            release=release,
+            asset=asset,
+            install_fpath=install_fpath,
+            action="reinstall",
+            reason="binary_missing",
+        )
+
+    existing_checksum = ghrel.install.compute_sha256(current_state.binary_fpath)
+    if existing_checksum != current_state.checksum:
+        return PackagePlan(
+            name=package.name,
+            package=package,
+            current_state=current_state,
+            current_version=current_version,
+            desired_version=desired_version,
+            release=release,
+            asset=asset,
+            install_fpath=install_fpath,
+            action="reinstall",
+            reason="checksum_mismatch",
+        )
+
+    return PackagePlan(
+        name=package.name,
+        package=package,
+        current_state=current_state,
+        current_version=current_version,
+        desired_version=desired_version,
+        release=release,
+        asset=asset,
+        install_fpath=install_fpath,
+        action="up_to_date",
+        reason=None,
+    )
+
+
+@beartype.beartype
+def _print_plan(plan: PackagePlan, *, dry_run: bool) -> None:
+    """Print status for a package plan."""
+    if plan.action == "up_to_date":
+        print(f"{plan.name}: ok (up to date)")
+        return
+
+    if plan.action == "install":
+        if dry_run:
+            line = f"{plan.name}: would install {plan.desired_version}"
+        else:
+            line = f"{plan.name}: installed {plan.desired_version}"
+    elif plan.action == "update":
+        line = f"{plan.name}: {plan.current_version} -> {plan.desired_version}"
+    elif plan.action == "reinstall":
+        if dry_run:
+            line = f"{plan.name}: would reinstall {plan.desired_version}"
+        else:
+            line = f"{plan.name}: reinstalled {plan.desired_version}"
+    else:
+        line = f"{plan.name}: {plan.desired_version}"
+
+    print(line)
+    if not dry_run:
+        return
+
+    binary_display = plan.package.binary
+    if not plan.package.archive:
+        binary_display = plan.asset.name
+    if not binary_display:
+        binary_display = plan.asset.name
+
+    print(f"  asset: {plan.asset.url}")
+    print(f"  binary: {binary_display} -> {_format_path(plan.install_fpath)}")
+
+
+@beartype.beartype
+def _print_warning(name: str, reason: str) -> None:
+    """Print a warning for a package action."""
+    if reason == "binary_missing":
+        message = "WARN binary missing, re-downloading"
+    elif reason == "checksum_mismatch":
+        message = "WARN checksum mismatch, re-downloading"
+    elif reason == "binary_path_changed":
+        message = "WARN binary path changed, re-downloading"
+    else:
+        message = "WARN re-downloading"
+    print(f"{name}: {message}")
+
+
+@beartype.beartype
+def _run_pre_install(
+    package: ghrel.packages.PackageConfig, plan: PackagePlan
+) -> str | None:
+    """Run pre_install hook if present."""
+    if package.pre_install is None:
+        return None
+
+    previous_version = plan.current_version
+    try:
+        package.pre_install(
+            plan.desired_version, plan.install_fpath.parent, previous_version
+        )
+    except Exception as err:
+        return f"pre_install failed: {err}"
+
+    return None
+
+
+@beartype.beartype
+def _run_post_install(
+    package: ghrel.packages.PackageConfig,
+    plan: PackagePlan,
+    install_result: ghrel.install.InstallResult,
+) -> str | None:
+    """Run post_install hook if present."""
+    if package.post_install is None:
+        return None
+
+    try:
+        package.post_install(
+            install_result.extracted_dpath,
+            plan.install_fpath.parent,
+            plan.desired_version,
+        )
+    except Exception as err:
+        return f"post_install failed: {err}"
+
+    return None
+
+
+@beartype.beartype
+def _format_path(path: pathlib.Path) -> str:
+    """Format paths with ~ for the home directory."""
+    home_dpath = pathlib.Path.home()
+    try:
+        relative = path.relative_to(home_dpath)
+    except ValueError:
+        return str(path)
+    return f"~/{relative}"
