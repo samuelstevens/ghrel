@@ -178,15 +178,21 @@ def run_sync(cmd: Sync) -> None:
             except Exception as err:
                 failures.append((name, f"Unexpected error: {err}"))
                 continue
+            post_install_err = _run_post_install(package, plan, install_result)
+            if post_install_err:
+                failures.append((name, post_install_err))
+                continue
+
+            verify_missing = package.verify is None
+            verify_err = _run_verify(package, plan, install_result)
+            if verify_err:
+                failures.append((name, verify_err))
+                continue
 
             state_packages[name] = install_result.package_state
             ghrel.state.write_state(ghrel.state.State(packages=state_packages))
 
-            _print_plan(plan, dry_run=False)
-
-            post_install_err = _run_post_install(package, plan, install_result)
-            if post_install_err:
-                failures.append((name, post_install_err))
+            _print_plan(plan, dry_run=False, verify_missing=verify_missing)
 
         if failures:
             print("")
@@ -377,7 +383,9 @@ def _make_plan(
 
 
 @beartype.beartype
-def _print_plan(plan: PackagePlan, *, dry_run: bool) -> None:
+def _print_plan(
+    plan: PackagePlan, *, dry_run: bool, verify_missing: bool = False
+) -> None:
     """Print status for a package plan."""
     if plan.action == "up_to_date":
         print(f"{plan.name}: ok (up to date)")
@@ -397,6 +405,13 @@ def _print_plan(plan: PackagePlan, *, dry_run: bool) -> None:
             line = f"{plan.name}: reinstalled {plan.desired_version}"
     else:
         line = f"{plan.name}: {plan.desired_version}"
+
+    if (
+        verify_missing
+        and not dry_run
+        and plan.action in {"install", "update", "reinstall"}
+    ):
+        line = f"{line} (no verify hook)"
 
     print(line)
     if not dry_run:
@@ -449,6 +464,30 @@ def _run_post_install(
         )
     except Exception as err:
         return f"post_install failed: {err}"
+
+    return None
+
+
+@beartype.beartype
+def _run_verify(
+    package: ghrel.packages.PackageConfig,
+    plan: PackagePlan,
+    install_result: ghrel.install.InstallResult,
+) -> str | None:
+    """Run ghrel_verify hook if present."""
+    if package.verify is None:
+        return None
+
+    try:
+        package.verify(
+            version=plan.desired_version,
+            binary_name=plan.install_fpath.name,
+            binary_path=plan.install_fpath,
+            checksum=install_result.package_state.checksum,
+            pkg=package.pkg,
+        )
+    except Exception as err:
+        return f"verify failed: {err}"
 
     return None
 

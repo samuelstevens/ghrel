@@ -6,7 +6,10 @@ import pytest
 
 import ghrel.cli
 import ghrel.errors
+import ghrel.github
+import ghrel.install
 import ghrel.packages
+import ghrel.state
 
 
 def test_run_prune_errors_on_missing_packages_dir(
@@ -32,3 +35,69 @@ def test_run_prune_dry_run_with_no_orphans(tmp_path: pathlib.Path, monkeypatch) 
 
     cmd = ghrel.cli.Prune(dry_run=True, verbose=False)
     ghrel.cli.run_prune(cmd)  # Should not raise
+
+
+def test_run_verify_calls_hook(tmp_path: pathlib.Path) -> None:
+    """_run_verify calls ghrel_verify hook with expected args."""
+    calls: dict[str, object] = {}
+
+    def verify(
+        *,
+        version: str,
+        binary_name: str,
+        binary_path: pathlib.Path,
+        checksum: str,
+        pkg: str,
+    ) -> None:
+        calls["version"] = version
+        calls["binary_name"] = binary_name
+        calls["binary_path"] = binary_path
+        calls["checksum"] = checksum
+        calls["pkg"] = pkg
+
+    package = ghrel.packages.PackageConfig(
+        name="tool",
+        pkg="owner/repo",
+        binary="tool",
+        install_as=None,
+        asset=None,
+        version=None,
+        archive=True,
+        post_install=None,
+        verify=verify,
+        package_fpath=tmp_path / "tool.py",
+    )
+    release = ghrel.github.Release(
+        tag="v1",
+        assets=(ghrel.github.ReleaseAsset(name="tool.tar.gz", url="https://e"),),
+    )
+    plan = ghrel.cli.PackagePlan(
+        name="tool",
+        package=package,
+        current_state=None,
+        current_version=None,
+        desired_version="v1",
+        release=release,
+        asset=release.assets[0],
+        install_fpath=tmp_path / "bin" / "tool",
+        action="install",
+        reason=None,
+    )
+    package_state = ghrel.state.PackageState(
+        version="v1",
+        checksum="sha256:abc123",
+        installed_at="2024-01-01T00:00:00Z",
+        binary_fpath=plan.install_fpath,
+    )
+    install_result = ghrel.install.InstallResult(
+        package_state=package_state,
+        extracted_dpath=None,
+    )
+
+    err = ghrel.cli._run_verify(package, plan, install_result)
+    assert err is None
+    assert calls["version"] == "v1"
+    assert calls["binary_name"] == "tool"
+    assert calls["binary_path"] == plan.install_fpath
+    assert calls["checksum"] == "sha256:abc123"
+    assert calls["pkg"] == "owner/repo"
