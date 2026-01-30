@@ -31,6 +31,13 @@ ghrel sync
 
 Package files are Python modules in `~/.config/ghrel/packages/`. The tool imports each `.py` file and reads module-level attributes.
 
+**Naming convention**: The package filename (without `.py`) determines:
+- The installed binary name (e.g., `rg.py` → `~/.local/bin/rg`)
+- The `binary_name` argument passed to hooks
+- The key in `state.json`
+
+Use `install_as` to override the installed name if it should differ from the package filename.
+
 ### Minimal Package
 
 ```python
@@ -43,6 +50,8 @@ binary = "fd"
 
 ```python
 # ripgrep.py
+import subprocess
+
 pkg = "BurntSushi/ripgrep"
 binary = "rg"                          # executable name in archive (can be path, see below)
 install_as = "rg"                      # name in ~/.local/bin (optional, defaults to binary basename)
@@ -50,24 +59,24 @@ asset = "*x86_64*linux*musl*.tar.gz"   # glob pattern for asset selection (optio
 version = "14.1.0"                     # pin to exact version (optional, default: latest)
 archive = True                         # whether asset is an archive (optional, default: True)
 
-def pre_install(version, install_dir, previous_version):
-    """Called before download/extraction. Optional."""
-    # version: str - version being installed
-    # install_dir: Path - where binary will be installed
-    # previous_version: str | None - currently installed version, or None if fresh install
-    pass
-
-def post_install(extracted_dir, install_dir, version):
-    """Called after binary is installed. Optional."""
+def ghrel_post_install(*, version, binary_name, binary_path, checksum, pkg, bin_dir, extracted_dir):
+    """Called after binary is installed, before verify. Optional."""
     import shutil
     from pathlib import Path
 
-    # Install shell completions
+    # Install shell completions from the extracted archive
     completions = extracted_dir / "complete" / "_rg"
     if completions.exists():
         dest = Path.home() / ".zsh" / "completions" / "_rg"
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(completions, dest)
+
+def ghrel_verify(*, version, binary_name, binary_path, checksum, pkg):
+    """Called after post_install to verify the binary works. Optional but recommended."""
+    # Run binary from PATH (not absolute path) to verify PATH is set up correctly
+    result = subprocess.run([binary_name, "--version"], capture_output=True, text=True)
+    assert result.returncode == 0, f"exit code {result.returncode}"
+    assert "ripgrep" in result.stdout, f"expected 'ripgrep' in output"
 ```
 
 ### Package Attributes
@@ -76,21 +85,43 @@ def post_install(extracted_dir, install_dir, version):
 |-----------|------|----------|---------|-------------|
 | `pkg` | `str` | Yes | - | GitHub repo in `owner/repo` format |
 | `binary` | `str` | Yes* | - | Executable path in archive (filename or explicit path like `fd-v10/fd`). *Ignored when `archive = False`. |
-| `install_as` | `str` | No | basename of `binary` | Installed binary name |
+| `install_as` | `str` | No | package filename stem | Installed binary name (overrides the default) |
 | `asset` | `str` | No | auto-detect | Glob pattern to match release asset filename |
 | `version` | `str` | No | latest | Exact version tag to pin |
 | `archive` | `bool` | No | `True` | Set to `False` for raw binary assets (not archived) |
 
 ### Hook Functions
 
+Hooks use the `ghrel_` prefix and receive typed keyword arguments.
+
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `pre_install` | `(version: str, install_dir: Path, previous_version: str \| None) -> None` | Called before download/extraction |
-| `post_install` | `(extracted_dir: Path \| None, install_dir: Path, version: str) -> None` | Called after binary is installed. `extracted_dir` is `None` for raw binaries (`archive=False`). |
+| `ghrel_post_install` | `(*, version, binary_name, binary_path, checksum, pkg, bin_dir, extracted_dir)` | Called after binary is installed, before verify |
+| `ghrel_verify` | `(*, version, binary_name, binary_path, checksum, pkg)` | Called after post_install to verify installation works |
 
-**Hook failure behavior**: If a hook raises an exception, that package is marked as failed and other packages continue processing.
-- **pre_install failure**: Download is skipped, binary is not installed.
-- **post_install failure**: Binary is already installed; it remains in place but package is marked failed in summary.
+**Hook arguments**:
+
+| Argument | Type | Description |
+|----------|------|-------------|
+| `version` | `str` | Version being installed (e.g., `"10.2.0"`) |
+| `binary_name` | `str` | Name of the installed binary (matches package filename stem) |
+| `binary_path` | `Path` | Absolute path to the installed binary |
+| `checksum` | `str` | SHA-256 checksum with `sha256:` prefix |
+| `pkg` | `str` | GitHub repo in `owner/repo` format |
+| `bin_dir` | `Path` | Directory where binary was installed |
+| `extracted_dir` | `Path` | Root of extracted archive (for accessing completions, man pages, etc.) |
+
+**Hook execution order**: install → `ghrel_post_install` → cleanup extracted_dir → `ghrel_verify` → write state
+
+**Hook failure behavior**:
+- **ghrel_post_install failure**: Chain stops, `ghrel_verify` does not run. Binary remains installed but state is not updated (next sync will retry).
+- **ghrel_verify failure**: Binary remains installed but state is not updated (next sync will retry). Just the exception message is shown.
+- **Missing ghrel_verify**: Warning shown inline (e.g., `fd: installed 10.2.0 (no verify hook)`).
+
+**Verify hook guidelines**:
+- Run the binary from PATH (e.g., `subprocess.run([binary_name, "--version"])`) rather than using the absolute path. This verifies PATH is configured correctly.
+- Raise an exception (e.g., `AssertionError`) on failure with a descriptive message.
+- Verify runs on both fresh installs and updates.
 
 ## CLI Commands
 
@@ -363,7 +394,7 @@ delta: ⚠ binary missing, re-downloading
 - **Checksum mismatch**: Re-downloads the binary automatically.
 - **Missing binary**: Warns about state drift, re-downloads.
 - **Missing binary in archive**: Fails that package if `binary` not found in archive.
-- **Hook failure**: Fails that package, continues with others. (post_install failure leaves binary installed)
+- **Hook failure**: Fails that package, continues with others. Binary remains installed but state is not updated (next sync will retry).
 - **Network errors**: Retries 3x with backoff, then marks package as failed.
 - **Invalid token**: Fails immediately with authentication error (no fallback).
 - **Lock contention**: Exits immediately if another ghrel process is running. (This is a system-level guard, not a package failure.)
@@ -413,9 +444,9 @@ install_as = "tailwindcss"
 
 ```python
 pkg = "sharkdp/fd"
-binary = "fd"
+binary = "fd-*-aarch64-apple-darwin/fd"
 
-def post_install(extracted_dir, install_dir, version):
+def ghrel_post_install(*, version, binary_name, binary_path, checksum, pkg, bin_dir, extracted_dir):
     import shutil
     from pathlib import Path
 
@@ -425,20 +456,12 @@ def post_install(extracted_dir, install_dir, version):
         dest = Path.home() / ".zsh" / "completions" / "_fd"
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(src, dest)
-```
 
-### With pre-install hook
-
-```python
-pkg = "jesseduffield/lazygit"
-binary = "lazygit"
-
-def pre_install(version, install_dir, previous_version):
+def ghrel_verify(*, version, binary_name, binary_path, checksum, pkg):
     import subprocess
-
-    if previous_version:
-        # Kill running lazygit before upgrade
-        subprocess.run(["pkill", "-f", "lazygit"], capture_output=True)
+    result = subprocess.run([binary_name, "--version"], capture_output=True, text=True)
+    assert result.returncode == 0
+    assert "fd" in result.stdout
 ```
 
 ### Pinned version (ripgrep)

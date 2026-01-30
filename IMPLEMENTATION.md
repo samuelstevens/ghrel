@@ -66,7 +66,7 @@ src/ghrel/
 
 - **Error model**: Exceptions with try/catch at package-processing boundary
 - **Package file load errors**: Exit early on `SyntaxError`, `ImportError`, or `AttributeError` (missing required attributes). Required: `pkg` always, `binary` when `archive=True` (default). These indicate broken config files that need user attention.
-- **Hook errors**: `pre_install`/`post_install` exceptions are per-package failures - continue processing other packages, report in summary
+- **Hook errors**: `ghrel_post_install`/`ghrel_verify` exceptions are per-package failures - continue processing other packages, report in summary. Binary remains installed but state is not updated (next sync will retry).
 - **Network/processing errors**: Continue to next package, collect failures for summary
 - **Corrupted state file**: Fail with error, don't auto-recover (let user decide)
 - **Invalid GITHUB_TOKEN**: Fail immediately with authentication error. Do not fall back to unauthenticated requests (explicit is better than silent degradation).
@@ -79,6 +79,7 @@ src/ghrel/
 
 ### Installation
 
+- **Naming convention**: The package filename stem determines the installed binary name. `rg.py` installs to `~/.local/bin/rg`. Use `install_as` to override.
 - **Atomic install sequence**:
   1. Download asset to temp directory (`/tmp/ghrel-<random>/`)
   2. Extract archive (or use directly if `archive=False`)
@@ -87,9 +88,24 @@ src/ghrel/
   5. Verify SHA-256 checksum of copied `.tmp` file matches source
   6. `chmod +x` on the `.tmp` file
   7. `os.rename` from `.tmp` to final name (atomic on same filesystem)
-  8. Update state file
+  8. Run `ghrel_post_install` hook (if defined) - extracted_dir still available
+  9. Clean up extracted temp directory
+  10. Run `ghrel_verify` hook (if defined) - extracted_dir no longer available
+  11. Update state file (only if all hooks succeeded)
 - **Checksum**: SHA-256, computed by streaming in chunks (handles large files)
-- **Raw binary hooks**: `post_install` receives `extracted_dir=None` for `archive=False` packages (hook must handle `None`)
+- **Raw binary hooks**: `ghrel_post_install` receives `extracted_dir=None` for `archive=False` packages (hook must handle `None`)
+
+### Hooks
+
+- **Naming**: Hooks use `ghrel_` prefix: `ghrel_post_install`, `ghrel_verify`
+- **Arguments**: Typed keyword arguments (no `**kwargs` required for forward compat)
+- **Execution order**: install → `ghrel_post_install` → cleanup → `ghrel_verify` → write state
+- **Failure handling**:
+  - `ghrel_post_install` failure: Chain stops, verify doesn't run, state not updated
+  - `ghrel_verify` failure: State not updated (next sync will retry)
+  - Just exception message shown (not full traceback)
+- **Missing `ghrel_verify`**: Warning shown per-package (e.g., `fd: installed 10.2.0 (no verify hook)`)
+- **Verify guidelines**: Run binary from PATH (not absolute path) to verify PATH setup is correct
 
 ### Platform Detection
 
