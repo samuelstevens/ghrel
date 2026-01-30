@@ -23,6 +23,7 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
+    "hypothesis>=6.0.0",
     "pytest>=8.0.0",
     "pytest-cov>=4.1.0",
     "pytest-timeout>=2.2.0",
@@ -30,7 +31,6 @@ dev = [
 ]
 
 [tool.ruff]
-line-length = 88
 target-version = "py312"
 
 [tool.ruff.lint]

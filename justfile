@@ -2,10 +2,10 @@
 check: fmt lint types test
 
 fmt:
-    uv run ruff format src tests
+    uvx ruff format --preview src tests
 
 lint:
-    uv run ruff check --fix src tests
+    uvx ruff check --fix src tests
 
 types:
     uvx ty check src

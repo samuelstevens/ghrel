@@ -5,6 +5,7 @@ import pathlib
 
 import pytest
 
+import ghrel.errors
 import ghrel.state
 
 
@@ -100,6 +101,6 @@ def test_acquire_lock_fails_when_held(tmp_path: pathlib.Path, monkeypatch) -> No
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
 
     with ghrel.state.acquire_lock():
-        with pytest.raises(ghrel.state.LockError):
+        with pytest.raises(ghrel.errors.LockError):
             with ghrel.state.acquire_lock():
                 pass
