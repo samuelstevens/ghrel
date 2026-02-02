@@ -53,14 +53,14 @@ class PackageConfig:
     pkg: str
     """GitHub repo in owner/repo format."""
 
-    binary: str | None
-    """Executable path inside archive, or None for raw binaries."""
+    binary: dict[str, str]
+    """Executable path patterns keyed by platform (ignored when archive is False)."""
 
     install_as: str | None
     """Installed binary name, or None to derive later."""
 
-    asset: str | None
-    """Asset glob pattern."""
+    asset: dict[str, str]
+    """Asset glob patterns keyed by platform."""
 
     version: str | None
     """Pinned version tag, or None for latest."""
@@ -120,16 +120,11 @@ def _load_package(package_fpath: pathlib.Path) -> PackageConfig:
 
     archive = _get_optional_attr(module, "archive", bool, package_fpath, default=True)
 
-    binary = _get_optional_attr(module, "binary", str, package_fpath, default=None)
-    if archive and binary is None:
-        binary = name
+    binary = _get_optional_dict_attr(module, "binary", package_fpath)
 
     install_as = _get_optional_attr(
         module, "install_as", str, package_fpath, default=None
     )
-    if archive and install_as is None:
-        assert binary is not None
-        install_as = pathlib.PurePosixPath(binary).name
     if install_as is not None and not install_as:
         raise ghrel.errors.ConfigError(
             message=f"Invalid install_as '{install_as}' in {package_fpath}",
@@ -143,7 +138,7 @@ def _load_package(package_fpath: pathlib.Path) -> PackageConfig:
             path=package_fpath,
         )
 
-    asset = _get_optional_attr(module, "asset", str, package_fpath, default=None)
+    asset = _get_optional_dict_attr(module, "asset", package_fpath)
     version = _get_optional_attr(module, "version", str, package_fpath, default=None)
 
     post_install_raw = _get_optional_callable_attr(
@@ -261,6 +256,58 @@ def _get_optional_attr(
         )
 
     return value
+
+
+@beartype.beartype
+def _get_optional_dict_attr(
+    module: types.ModuleType,
+    name: str,
+    package_fpath: pathlib.Path,
+) -> dict[str, str]:
+    """Fetch an optional dict attribute."""
+    if not hasattr(module, name):
+        return {}
+
+    value = getattr(module, name)
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ghrel.errors.ConfigError(
+            message=f"Invalid type for '{name}' in {package_fpath} (expected dict)",
+            hint="Use a dict keyed by platform like {'linux-x86_64': '<pattern>'}.",
+            path=package_fpath,
+        )
+
+    return _validate_str_dict(name, value, package_fpath)
+
+
+@beartype.beartype
+def _validate_str_dict(
+    name: str,
+    value: dict[tp.Any, tp.Any],
+    package_fpath: pathlib.Path,
+) -> dict[str, str]:
+    """Validate a dict with string keys and non-empty string values."""
+    if not value:
+        return {}
+
+    validated: dict[str, str] = {}
+    for key, item in value.items():
+        if not isinstance(key, str):
+            raise ghrel.errors.ConfigError(
+                message=f"Invalid key for '{name}' in {package_fpath}",
+                hint="Keys must be strings like 'linux-x86_64'.",
+                path=package_fpath,
+            )
+        if not isinstance(item, str) or not item:
+            raise ghrel.errors.ConfigError(
+                message=f"Invalid value for '{name}' in {package_fpath}",
+                hint="Values must be non-empty strings.",
+                path=package_fpath,
+            )
+        validated[key] = item
+
+    return validated
 
 
 @beartype.beartype

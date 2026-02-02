@@ -20,12 +20,17 @@ uv tool install ghrel
 ```sh
 # Create a package file
 mkdir -p ~/.config/ghrel/packages
-echo 'pkg = "junegunn/fzf"' > ~/.config/ghrel/packages/fzf.py
-echo 'binary = "fzf"' >> ~/.config/ghrel/packages/fzf.py
+cat > ~/.config/ghrel/packages/fzf.py << 'EOF'
+pkg = "junegunn/fzf"
+asset = {"linux-x86_64": "*linux_amd64*"}  # Explicit platform pattern
+binary = {"linux-x86_64": "fzf"}
+EOF
 
 # Sync (install/upgrade all packages)
 ghrel sync
 ```
+
+**Note**: `asset` and `binary` must be dicts keyed by platform. If omitted, ghrel defaults them to `{}` and errors with a missing platform key hint.
 
 ## Package File Format
 
@@ -43,9 +48,11 @@ Use `install_as` to override the installed name if it should differ from the pac
 ```python
 # jj.py
 pkg = "jj-vcs/jj"
+asset = {"linux-x86_64": "*x86_64*linux*musl*"}
+binary = {"linux-x86_64": "jj"}
 ```
 
-When `binary` is omitted, ghrel looks for an executable named `jj` (the package filename) in the archive. If not found, it lists the archive contents and suggests using an explicit path (including a wildcard to avoid version pinning).
+When `asset` or `binary` is omitted, ghrel defaults to `{}` and fails with a missing platform key error. Add the current platform key to each dict to proceed.
 
 ### Full Package (all options)
 
@@ -54,9 +61,13 @@ When `binary` is omitted, ghrel looks for an executable named `jj` (the package 
 import subprocess
 
 pkg = "BurntSushi/ripgrep"
-binary = "rg"                          # executable name in archive (can be path, see below)
-install_as = "rg"                      # name in ~/.local/bin (optional, defaults to binary basename)
-asset = "*x86_64*linux*musl*.tar.gz"   # glob pattern for asset selection (optional)
+binary = {                             # executable path in archive (can be path, see below)
+    "linux-x86_64": "rg",
+}
+install_as = "rg"                      # name in ~/.local/bin (optional, defaults to package name)
+asset = {                              # glob pattern for asset selection (optional)
+    "linux-x86_64": "*x86_64*linux*musl*.tar.gz",
+}
 version = "14.1.0"                     # pin to exact version (optional, default: latest)
 archive = True                         # whether asset is an archive (optional, default: True)
 
@@ -84,11 +95,48 @@ def ghrel_verify(*, version: str, bin_name: str):
 | Attribute | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `pkg` | `str` | Yes | - | GitHub repo in `owner/repo` format |
-| `binary` | `str` | No | package name | Executable path in archive (filename or explicit path like `fd-v10/fd`). Ignored when `archive = False`. |
-| `install_as` | `str` | No | package filename stem | Installed binary name (overrides the default) |
-| `asset` | `str` | No | auto-detect | Glob pattern to match release asset filename |
+| `binary` | `dict[str, str]` | No | `{}` | Executable path in archive (filename or explicit path like `fd-v10/fd`) keyed by platform (see Platform Keys). Ignored when `archive = False`. |
+| `install_as` | `str` | No | package filename stem | Installed binary name (overrides the default). Always a string (same on all platforms). |
+| `asset` | `dict[str, str]` | No | `{}` | Glob pattern to match release asset filename, keyed by platform (see Platform Keys). |
 | `version` | `str` | No | latest | Exact version tag to pin |
 | `archive` | `bool` | No | `True` | Set to `False` for raw binary assets (not archived) |
+
+### Platform Keys
+
+When `asset` or `binary` is a dict, keys must be one of these platform strings:
+
+| Key | OS | Architecture |
+|-----|-----|--------------|
+| `darwin-arm64` | macOS | Apple Silicon |
+| `darwin-x86_64` | macOS | Intel |
+| `linux-arm64` | Linux | ARM64/AArch64 |
+| `linux-x86_64` | Linux | x86-64/AMD64 |
+
+Keys are matched exactly—no normalization (e.g., `linux-amd64` is not valid, use `linux-x86_64`).
+
+**Example cross-platform package**:
+
+```python
+pkg = "BurntSushi/ripgrep"
+
+asset = {
+    "darwin-arm64": "ripgrep-*-aarch64-apple-darwin.tar.gz",
+    "darwin-x86_64": "ripgrep-*-x86_64-apple-darwin.tar.gz",
+    "linux-arm64": "ripgrep-*-aarch64-unknown-linux-gnu.tar.gz",
+    "linux-x86_64": "ripgrep-*-x86_64-unknown-linux-musl.tar.gz",
+}
+
+binary = {
+    "darwin-arm64": "ripgrep-*-aarch64-apple-darwin/rg",
+    "darwin-x86_64": "ripgrep-*-x86_64-apple-darwin/rg",
+    "linux-arm64": "ripgrep-*-aarch64-unknown-linux-gnu/rg",
+    "linux-x86_64": "ripgrep-*-x86_64-unknown-linux-musl/rg",
+}
+```
+
+**Strings are not allowed**: `asset` and `binary` must be dicts keyed by platform. Missing platform keys fail with a helpful error.
+
+When both `asset` and `binary` are dicts, only the current platform's key must exist in both - other keys can differ.
 
 ### Hook Functions
 
@@ -152,8 +200,13 @@ ghrel sync --dry-run
 fd: 9.0.0 → 10.2.0
   asset: https://github.com/sharkdp/fd/releases/download/v10.2.0/fd-v10.2.0-x86_64-apple-darwin.tar.gz
   binary: fd-v10.2.0-x86_64-apple-darwin/fd → ~/.local/bin/fd
+rg: would install 14.1.0
+  asset: https://...ripgrep-14.1.0-x86_64-unknown-linux-musl.tar.gz (from linux-x86_64 key)
+  binary: ripgrep-*-x86_64-unknown-linux-musl/rg → ~/.local/bin/rg (from linux-x86_64 key)
 fzf: ✓ (up to date)
 ```
+
+When `asset` or `binary` is resolved from a dict, the output shows `(from <platform> key)` to help debug cross-platform configs.
 
 ### ghrel list
 
@@ -250,22 +303,24 @@ If interrupted at any step, no partial binary is left in the install directory.
 
 ## Asset Selection
 
-When a release has multiple assets, ghrel selects based on:
+When a release has multiple assets, ghrel selects based on the `asset` attribute:
 
-1. **Explicit pattern**: If `asset` is set, use glob match
-2. **Platform detection**: Match current OS (`darwin`, `linux`) and arch (`arm64`, `amd64`, `x86_64`)
+1. **Dict**: Look up current platform key, then use that value as the glob pattern
+2. **Omitted**: Defaults to `{}` and fails with a missing platform key error
 
-**Ambiguity is an error**: If multiple assets match the pattern (or platform heuristics), ghrel fails that package with an error listing the matching assets. This prevents accidentally installing the wrong build.
+**Ambiguity is an error**: If multiple assets match the pattern, ghrel fails that package with an error listing the matching assets. This prevents accidentally installing the wrong build.
 
 Asset matching uses fnmatch-style globs against the asset filename:
 
 ```python
-# Match arm64 macOS tarball specifically
-asset = "*darwin*arm64*.tar.gz"
-
-# Match musl Linux builds
-asset = "*linux*musl*.tar.gz"
+# Cross-platform: dict keyed by platform
+asset = {
+    "darwin-arm64": "*aarch64-apple-darwin*.tar.gz",
+    "linux-x86_64": "*x86_64-unknown-linux-musl*.tar.gz",
+}
 ```
+
+**Missing platform key**: If `asset` is a dict and the current platform's key is missing, ghrel fails with an error showing the two closest matching keys (by edit distance) and suggests adding the current platform's key.
 
 **Tip**: Be specific with your asset pattern to avoid ambiguity. Include the archive extension.
 
@@ -277,8 +332,7 @@ Set `archive = False` to handle these:
 
 ```python
 pkg = "some/tool"
-binary = "tool"           # ignored when archive = False
-asset = "*linux*amd64*"
+asset = {"linux-x86_64": "*linux*amd64*"}
 archive = False           # asset IS the binary, not an archive
 ```
 
@@ -290,23 +344,16 @@ When `archive = False`:
 
 ## Binary Detection
 
-The `binary` attribute specifies which executable to extract from the archive. If omitted, defaults to the package filename (e.g., `jj.py` → look for `jj`).
-
-**Default** - package name:
-```python
-# jj.py
-pkg = "jj-vcs/jj"
-# binary defaults to "jj"
-```
+The `binary` attribute specifies which executable to extract from the archive, keyed by platform. If omitted, defaults to `{}` and fails with a missing platform key error.
 
 **Simple case** - just the filename:
 ```python
-binary = "fd"  # searches root and all subdirectories for "fd"
+binary = {"linux-x86_64": "fd"}  # searches root and subdirectories for "fd"
 ```
 
 **Explicit path** - for archives with nested/versioned directories:
 ```python
-binary = "fd-v10.2.0-x86_64-unknown-linux-gnu/fd"
+binary = {"linux-x86_64": "fd-v10.2.0-x86_64-unknown-linux-gnu/fd"}
 ```
 
 Search order for simple filenames:
@@ -403,6 +450,9 @@ delta: ⚠ binary missing, re-downloading
 - **Package file load errors**: If any package file fails to load (`SyntaxError`, `ImportError`, or missing required attributes), ghrel exits immediately. This catches config mistakes early.
 - **Continue on processing errors**: Once packages are loaded, each is processed independently. Hook failures, network errors, and asset issues don't stop other packages.
 - **Summary at end**: Failed packages are listed with error messages after sync completes.
+- **Missing platform key**: If `asset` or `binary` is a dict and the current platform's key is missing, fails with helpful error (see below).
+- **Empty dict**: If `asset` or `binary` is an empty dict, fails at sync time with "platform not found in empty dict" error.
+- **Invalid dict values**: If dict values are not non-empty strings, fails at load time.
 - **Ambiguous asset**: Fails if multiple assets match pattern - lists matching assets.
 - **Checksum mismatch**: Re-downloads the binary automatically.
 - **Missing binary**: Warns about state drift, re-downloads.
@@ -411,6 +461,24 @@ delta: ⚠ binary missing, re-downloading
 - **Network errors**: Retries 3x with backoff, then marks package as failed.
 - **Invalid token**: Fails immediately with authentication error (no fallback).
 - **Lock contention**: Exits immediately if another ghrel process is running. (This is a system-level guard, not a package failure.)
+
+### Platform Key Error Messages
+
+Error messages aim for Elm/Rust compiler quality—showing context and actionable suggestions:
+
+```
+Error: Platform 'linux-x86_64' not found in asset dict
+
+  In ~/.config/ghrel/packages/rg.py:
+    asset = {
+        "darwin-arm64": "ripgrep-*-aarch64-apple-darwin.tar.gz",
+        "darwin-x86_64": "ripgrep-*-x86_64-apple-darwin.tar.gz",
+    }
+
+  Closest matches: darwin-x86_64, darwin-arm64
+
+  Add a 'linux-x86_64' key to the asset dict.
+```
 
 ## Dotfiles Integration
 
@@ -440,15 +508,43 @@ ghrel sync
 
 ```python
 pkg = "junegunn/fzf"
-binary = "fzf"
+asset = {"linux-x86_64": "*linux_amd64*"}  # Be explicit about platform
+binary = {"linux-x86_64": "fzf"}
+```
+
+### Cross-platform (ripgrep)
+
+```python
+import subprocess
+
+pkg = "BurntSushi/ripgrep"
+
+asset = {
+    "darwin-arm64": "ripgrep-*-aarch64-apple-darwin.tar.gz",
+    "darwin-x86_64": "ripgrep-*-x86_64-apple-darwin.tar.gz",
+    "linux-arm64": "ripgrep-*-aarch64-unknown-linux-gnu.tar.gz",
+    "linux-x86_64": "ripgrep-*-x86_64-unknown-linux-musl.tar.gz",
+}
+
+binary = {
+    "darwin-arm64": "ripgrep-*-aarch64-apple-darwin/rg",
+    "darwin-x86_64": "ripgrep-*-x86_64-apple-darwin/rg",
+    "linux-arm64": "ripgrep-*-aarch64-unknown-linux-gnu/rg",
+    "linux-x86_64": "ripgrep-*-x86_64-unknown-linux-musl/rg",
+}
+
+def ghrel_verify(*, version: str, bin_name: str):
+    result = subprocess.run([bin_name, "--version"], capture_output=True, text=True)
+    assert result.returncode == 0
+    assert "ripgrep" in result.stdout
 ```
 
 ### Raw binary (no archive)
 
 ```python
 pkg = "tailwindlabs/tailwindcss"
-binary = "tailwindcss"  # ignored when archive=False
-asset = "*macos-arm64*"
+binary = {"darwin-arm64": "tailwindcss"}  # ignored when archive=False
+asset = {"darwin-arm64": "*macos-arm64*"}
 archive = False
 install_as = "tailwindcss"
 ```
@@ -460,7 +556,7 @@ import subprocess
 from pathlib import Path
 
 pkg = "sharkdp/fd"
-binary = "fd-*-aarch64-apple-darwin/fd"
+binary = {"darwin-arm64": "fd-*-aarch64-apple-darwin/fd"}
 
 def ghrel_post_install(*, version: str, bin_name: str, bin_path: Path, checksum: str, pkg: str, bin_dir: Path, extracted_dir: Path):
     import shutil
@@ -482,18 +578,18 @@ def ghrel_verify(*, version: str, bin_name: str):
 
 ```python
 pkg = "BurntSushi/ripgrep"
-binary = "rg"
+binary = {"linux-x86_64": "rg"}
 version = "14.1.0"
-asset = "*x86_64*linux*musl*.tar.gz"
+asset = {"linux-x86_64": "*x86_64*linux*musl*.tar.gz"}
 ```
 
 ### Explicit binary path (nested directory)
 
 ```python
 pkg = "BurntSushi/ripgrep"
-binary = "ripgrep-14.1.0-x86_64-unknown-linux-musl/rg"
+binary = {"linux-x86_64": "ripgrep-14.1.0-x86_64-unknown-linux-musl/rg"}
 install_as = "rg"
-asset = "*x86_64*linux*musl*.tar.gz"
+asset = {"linux-x86_64": "*x86_64*linux*musl*.tar.gz"}
 ```
 
 ### Multiple binaries from one repo (pi-mono)
@@ -501,15 +597,15 @@ asset = "*x86_64*linux*musl*.tar.gz"
 ```python
 # pi.py
 pkg = "badlogic/pi-mono"
-binary = "pi"
-asset = "*darwin*arm64*.tar.gz"
+binary = {"darwin-arm64": "pi"}
+asset = {"darwin-arm64": "*darwin*arm64*.tar.gz"}
 ```
 
 ```python
 # poom.py
 pkg = "badlogic/pi-mono"
-binary = "poom"
-asset = "*darwin*arm64*.tar.gz"
+binary = {"darwin-arm64": "poom"}
+asset = {"darwin-arm64": "*darwin*arm64*.tar.gz"}
 ```
 
 ## Non-Goals

@@ -2,6 +2,13 @@
 
 Technical decisions and implementation notes for the ghrel package manager.
 
+## Breaking Changes (v2.0)
+
+**Dict-only asset/binary**: The `asset` and `binary` attributes must be dicts keyed by platform. Strings are rejected. If omitted, they default to `{}` and fail with a missing platform key error. This change:
+- Makes package files explicit and portable across machines
+- Eliminates surprising behavior when asset naming conventions don't match ghrel's heuristics
+- Enables cross-platform package files via platform-keyed dicts
+
 ## Overview
 
 | Aspect | Decision |
@@ -65,7 +72,7 @@ src/ghrel/
 ### Error Handling
 
 - **Error model**: Exceptions with try/catch at package-processing boundary
-- **Package file load errors**: Exit early on `SyntaxError`, `ImportError`, or `AttributeError` (missing required attributes). Only `pkg` is required. These indicate broken config files that need user attention.
+- **Package file load errors**: Exit early on `SyntaxError`, `ImportError`, or `AttributeError` (missing required attributes). Only `pkg` is required. Also exit early if `asset` or `binary` dict values are not non-empty strings. These indicate broken config files that need user attention.
 - **Hook errors**: `ghrel_post_install`/`ghrel_verify` exceptions are per-package failures - continue processing other packages, report in summary. Binary remains installed but state is not updated (next sync will retry).
 - **Network/processing errors**: Continue to next package, collect failures for summary
 - **Corrupted state file**: Fail with error, don't auto-recover (let user decide)
@@ -112,6 +119,8 @@ src/ghrel/
 
 - **Approach**: Direct use of `platform.system()`/`platform.machine()` with normalization
 - **Aliases**: Normalize common variations (e.g., `x86_64` ↔ `amd64`, `arm64` ↔ `aarch64`)
+- **Platform key**: Combine normalized OS and arch into a string like `"linux-x86_64"` for dict lookups
+- **Valid keys**: `darwin-arm64`, `darwin-x86_64`, `linux-arm64`, `linux-x86_64` (fixed set)
 
 ### CLI & Output
 
@@ -140,20 +149,31 @@ src/ghrel/
 
 ### Asset Selection
 
-1. If `asset` pattern specified: use `fnmatch` against asset filenames
-2. If no pattern: auto-detect based on OS (`darwin`/`linux`) and arch (`arm64`/`x86_64`/`amd64`)
+1. If `asset` is a dict: look up current platform key (e.g., `"linux-x86_64"`), use that value as the glob pattern
+2. If `asset` is omitted: default to `{}` and fail with a missing platform key error
 3. **Ambiguity is an error**: If multiple assets match, fail with error listing all matches. User must make pattern more specific.
+
+**Dict handling**:
+- Keys must be strings matching the pattern `{os}-{arch}` where os ∈ {darwin, linux} and arch ∈ {arm64, x86_64}
+- Values must be non-empty strings (validated at load time)
+- Only the current platform's key is validated at runtime—typos in other keys go unnoticed until someone runs on that platform
+- If current platform key missing: error with two closest matches (Levenshtein distance) and suggestion to add the key
+- Empty dict: treated as missing key error at sync time
+
+**Binary dict handling**:
+- Same rules as asset dicts
+- If both are dicts, only the current platform's key must exist in both—other keys can differ
 
 ### Binary Search Order
 
-If `binary` is omitted, default it to the package filename stem.
+If `binary` is omitted, default it to `{}` and fail with a missing platform key error.
 
-For simple `binary = "name"` (no path separator):
+For simple `binary = {"linux-x86_64": "name"}` (no path separator):
 1. Look for exact filename match in archive root
 2. Look for exact filename match in any subdirectory
 3. Fail if not found or if multiple matches
 
-For explicit path `binary = "dir/name"`:
+For explicit path `binary = {"linux-x86_64": "dir/name"}`:
 - Match exactly, fail if not found
 
 ### State & Locking
@@ -210,7 +230,20 @@ tests/
 - State file: read/write/locking, corruption detection
 - Installation: atomic writes, checksum verification, chmod
 - CLI: argument parsing, dry-run output format
-- Platform detection: OS/arch normalization
+- Platform detection: OS/arch normalization, platform key generation
+
+### Platform Dict Testing
+
+Mock platform in unit tests to test all platform paths:
+
+- **Dict resolution**: Current platform key exists → resolves correctly
+- **Missing key**: Current platform not in dict → error with two closest matches
+- **Empty dict**: Error at sync time
+- **Invalid values**: Non-string or empty string values → error at load time
+- **Both dicts**: Only current platform key must exist in both
+- **Levenshtein suggestions**: Verify closest matches are correct (e.g., `"linux-x64"` suggests `"linux-x86_64"`)
+
+Use actual platform in integration tests for realistic coverage.
 
 ## Environment Variables
 
@@ -254,7 +287,7 @@ class CLI:
 
 ## Error Messages
 
-Design errors to be actionable:
+Design errors to be actionable, inspired by Elm and Rust compilers. Show context, what went wrong, and how to fix it.
 
 ```
 # Version not found
@@ -268,15 +301,45 @@ Error: Multiple assets match pattern '*linux*' for sharkdp/fd v10.2.0:
   - fd-v10.2.0-x86_64-unknown-linux-musl.tar.gz
   Hint: Make your pattern more specific (e.g., '*linux*musl*')
 
-# Binary not found in archive (binary defaults to package name if not specified)
+# Binary not found in archive
 Error: Binary 'fd' not found in archive for sharkdp/fd v10.2.0
   Archive contents:
     fd-v10.2.0-x86_64-unknown-linux-gnu/
     fd-v10.2.0-x86_64-unknown-linux-gnu/fd
     fd-v10.2.0-x86_64-unknown-linux-gnu/README.md
-  Hint: Set binary = "fd-v10.2.0-x86_64-unknown-linux-gnu/fd"
-  Hint: Use wildcards for version independence: binary = "fd-*-x86_64-unknown-linux-gnu/fd"
+  Hint: Set binary = {"linux-x86_64": "fd-v10.2.0-x86_64-unknown-linux-gnu/fd"}
+  Hint: Use wildcards for version independence: binary = {"linux-x86_64": "fd-*-x86_64-unknown-linux-gnu/fd"}
+
+# Missing platform key in dict
+Error: Platform 'linux-x86_64' not found in asset dict
+
+  In ~/.config/ghrel/packages/rg.py:
+    asset = {
+        "darwin-arm64": "ripgrep-*-aarch64-apple-darwin.tar.gz",
+        "darwin-x86_64": "ripgrep-*-x86_64-apple-darwin.tar.gz",
+    }
+
+  Closest matches: darwin-x86_64, darwin-arm64
+
+  Add a 'linux-x86_64' key to the asset dict.
+
+# Empty dict
+Error: Platform 'linux-x86_64' not found in empty asset dict
+
+  In ~/.config/ghrel/packages/rg.py:
+    asset = {}
+
+  Add a 'linux-x86_64' key to the asset dict.
+
 ```
+
+### Levenshtein Distance for Suggestions
+
+When a platform key is missing from a dict, show the two closest matches by edit distance. This helps users who:
+- Made a typo (e.g., `"linux-x64"` instead of `"linux-x86_64"`)
+- Are on a new platform and need to see what keys exist
+
+Implementation: Use standard Levenshtein distance algorithm. No external dependencies—implement inline or use `difflib.SequenceMatcher` ratio as approximation.
 
 ## File Structure
 

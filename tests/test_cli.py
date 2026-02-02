@@ -55,9 +55,9 @@ def test_run_verify_calls_hook(tmp_path: pathlib.Path) -> None:
     package = ghrel.packages.PackageConfig(
         name="tool",
         pkg="owner/repo",
-        binary="tool",
+        binary={},
         install_as=None,
-        asset=None,
+        asset={},
         version=None,
         archive=True,
         post_install=None,
@@ -76,6 +76,7 @@ def test_run_verify_calls_hook(tmp_path: pathlib.Path) -> None:
         desired_version="v1",
         release=release,
         asset=release.assets[0],
+        binary_pattern="tool",
         install_fpath=tmp_path / "bin" / "tool",
         action="install",
         reason=None,
@@ -110,9 +111,13 @@ def test_run_sync_post_install_sees_extracted_dir(
     packages_dpath.mkdir(parents=True)
     (packages_dpath / "tool.py").write_text(
         "import pathlib\n"
+        "import ghrel.platform\n"
         "pkg = 'owner/repo'\n"
-        "binary = 'tool'\n"
-        "asset = 'tool.tar.gz'\n"
+        "PLATFORM = ghrel.platform.get_platform_key(\n"
+        "    ghrel.platform.get_os(), ghrel.platform.get_arch()\n"
+        ")\n"
+        "binary = {PLATFORM: 'tool'}\n"
+        "asset = {PLATFORM: 'tool.tar.gz'}\n"
         "EXTRACTED_DIR = None\n"
         "\n"
         "def ghrel_post_install(*, version, bin_name, bin_path, checksum, pkg, "
@@ -173,9 +178,13 @@ def test_run_sync_verifies_up_to_date_package(
     packages_dpath.mkdir(parents=True)
     marker_fpath = tmp_path / "verify-called"
     (packages_dpath / "tool.py").write_text(
+        "import ghrel.platform\n"
         "pkg = 'owner/repo'\n"
-        "binary = 'tool'\n"
-        "asset = 'tool.tar.gz'\n"
+        "PLATFORM = ghrel.platform.get_platform_key(\n"
+        "    ghrel.platform.get_os(), ghrel.platform.get_arch()\n"
+        ")\n"
+        "binary = {PLATFORM: 'tool'}\n"
+        "asset = {PLATFORM: 'tool.tar.gz'}\n"
         f"MARKER_FPATH = {str(marker_fpath)!r}\n"
         "\n"
         "def ghrel_verify(*, version, bin_name):\n"
@@ -232,7 +241,13 @@ def test_run_sync_warns_no_verify_hook_up_to_date(
     packages_dpath = tmp_path / "ghrel" / "packages"
     packages_dpath.mkdir(parents=True)
     (packages_dpath / "tool.py").write_text(
-        "pkg = 'owner/repo'\nbinary = 'tool'\nasset = 'tool.tar.gz'\n"
+        "import ghrel.platform\n"
+        "pkg = 'owner/repo'\n"
+        "PLATFORM = ghrel.platform.get_platform_key(\n"
+        "    ghrel.platform.get_os(), ghrel.platform.get_arch()\n"
+        ")\n"
+        "binary = {PLATFORM: 'tool'}\n"
+        "asset = {PLATFORM: 'tool.tar.gz'}\n"
     )
 
     bin_dpath = tmp_path / "bin"
@@ -283,9 +298,13 @@ def test_run_sync_prints_verify_failed_status_up_to_date(
     packages_dpath = tmp_path / "ghrel" / "packages"
     packages_dpath.mkdir(parents=True)
     (packages_dpath / "tool.py").write_text(
+        "import ghrel.platform\n"
         "pkg = 'owner/repo'\n"
-        "binary = 'tool'\n"
-        "asset = 'tool.tar.gz'\n"
+        "PLATFORM = ghrel.platform.get_platform_key(\n"
+        "    ghrel.platform.get_os(), ghrel.platform.get_arch()\n"
+        ")\n"
+        "binary = {PLATFORM: 'tool'}\n"
+        "asset = {PLATFORM: 'tool.tar.gz'}\n"
         "\n"
         "def ghrel_verify(*, version, bin_name):\n"
         "    raise AssertionError('boom')\n"
@@ -341,9 +360,13 @@ def test_run_sync_empty_assertion_error_is_failure_up_to_date(
     packages_dpath = tmp_path / "ghrel" / "packages"
     packages_dpath.mkdir(parents=True)
     (packages_dpath / "tool.py").write_text(
+        "import ghrel.platform\n"
         "pkg = 'owner/repo'\n"
-        "binary = 'tool'\n"
-        "asset = 'tool.tar.gz'\n"
+        "PLATFORM = ghrel.platform.get_platform_key(\n"
+        "    ghrel.platform.get_os(), ghrel.platform.get_arch()\n"
+        ")\n"
+        "binary = {PLATFORM: 'tool'}\n"
+        "asset = {PLATFORM: 'tool.tar.gz'}\n"
         "\n"
         "def ghrel_verify(*, version, bin_name):\n"
         "    raise AssertionError()  # empty message\n"
@@ -398,9 +421,13 @@ def test_run_sync_empty_assertion_error_is_failure_new_install(
     packages_dpath = tmp_path / "ghrel" / "packages"
     packages_dpath.mkdir(parents=True)
     (packages_dpath / "tool.py").write_text(
+        "import ghrel.platform\n"
         "pkg = 'owner/repo'\n"
-        "binary = 'tool'\n"
-        "asset = 'tool.tar.gz'\n"
+        "PLATFORM = ghrel.platform.get_platform_key(\n"
+        "    ghrel.platform.get_os(), ghrel.platform.get_arch()\n"
+        ")\n"
+        "binary = {PLATFORM: 'tool'}\n"
+        "asset = {PLATFORM: 'tool.tar.gz'}\n"
         "\n"
         "def ghrel_verify(*, version, bin_name):\n"
         "    raise AssertionError()  # empty message\n"
@@ -457,7 +484,13 @@ def test_run_sync_no_verify_hook_warning_on_fresh_install(
     packages_dpath = tmp_path / "ghrel" / "packages"
     packages_dpath.mkdir(parents=True)
     (packages_dpath / "tool.py").write_text(
-        "pkg = 'owner/repo'\nbinary = 'tool'\nasset = 'tool.tar.gz'\n"
+        "import ghrel.platform\n"
+        "pkg = 'owner/repo'\n"
+        "PLATFORM = ghrel.platform.get_platform_key(\n"
+        "    ghrel.platform.get_os(), ghrel.platform.get_arch()\n"
+        ")\n"
+        "binary = {PLATFORM: 'tool'}\n"
+        "asset = {PLATFORM: 'tool.tar.gz'}\n"
         # No ghrel_verify defined
     )
 

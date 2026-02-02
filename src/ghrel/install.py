@@ -58,12 +58,38 @@ def select_asset(
     arch: str,
 ) -> ghrel.github.ReleaseAsset:
     """Select a release asset based on package config and platform."""
-    if package.asset:
-        matches = _match_assets_by_pattern(release.assets, package.asset)
-        return _require_single_match(matches, package.asset, package.pkg, release.tag)
+    platform_key = ghrel.platform.get_platform_key(os_name, arch)
+    pattern = _get_platform_pattern(
+        package.asset, platform_key, "asset", package.package_fpath
+    )
+    return _select_asset_by_pattern(release, package, pattern)
 
-    matches = _match_assets_by_platform(release.assets, os_name, arch)
-    return _require_single_match(matches, None, package.pkg, release.tag)
+
+@beartype.beartype
+def get_binary_pattern(
+    package: ghrel.packages.PackageConfig,
+    os_name: str,
+    arch: str,
+) -> str | None:
+    """Return the binary pattern for the current platform."""
+    if not package.archive:
+        return None
+
+    platform_key = ghrel.platform.get_platform_key(os_name, arch)
+    return _get_platform_pattern(
+        package.binary, platform_key, "binary", package.package_fpath
+    )
+
+
+@beartype.beartype
+def _select_asset_by_pattern(
+    release: ghrel.github.Release,
+    package: ghrel.packages.PackageConfig,
+    pattern: str,
+) -> ghrel.github.ReleaseAsset:
+    """Select a release asset using a glob pattern."""
+    matches = _match_assets_by_pattern(release.assets, pattern)
+    return _require_single_match(matches, pattern, package.pkg, release.tag)
 
 
 @beartype.beartype
@@ -71,6 +97,7 @@ def install_release_asset(
     package: ghrel.packages.PackageConfig,
     release: ghrel.github.Release,
     asset: ghrel.github.ReleaseAsset,
+    binary_pattern: str | None,
     bin_dpath: pathlib.Path,
     client: ghrel.github.GitHubClient,
     temp_dpath: pathlib.Path | None = None,
@@ -84,6 +111,7 @@ def install_release_asset(
                 package,
                 release,
                 asset,
+                binary_pattern,
                 bin_dpath,
                 client,
                 temp_dpath=pathlib.Path(temp_dpath_str),
@@ -99,7 +127,11 @@ def install_release_asset(
     if package.archive:
         extracted_dpath = temp_dpath / "extract"
         ghrel.archive.extract_archive(asset_fpath, extracted_dpath)
-        source_fpath = _find_binary(extracted_dpath, package.binary, asset_fpath)
+        if binary_pattern is None:
+            raise ghrel.errors.GhrelError(
+                message=f"Missing binary pattern for archive {asset_fpath}",
+            )
+        source_fpath = _find_binary(extracted_dpath, binary_pattern, asset_fpath)
 
     install_as = get_install_as(package, asset)
     dest_fpath = bin_dpath / install_as
@@ -126,34 +158,101 @@ def _match_assets_by_pattern(
 
 
 @beartype.beartype
-def _match_assets_by_platform(
-    assets: tuple[ghrel.github.ReleaseAsset, ...],
-    os_name: str,
-    arch: str,
-) -> tuple[ghrel.github.ReleaseAsset, ...]:
-    """Match assets using OS and architecture hints."""
-    os_keys = ghrel.platform.get_os_keys(os_name)
-    arch_keys = ghrel.platform.get_arch_keys(arch)
+def _get_platform_pattern(
+    value: dict[str, str],
+    platform_key: str,
+    name: str,
+    package_fpath: pathlib.Path,
+) -> str:
+    """Fetch a platform-specific pattern from a dict."""
+    if not value:
+        lines = [
+            f"Platform '{platform_key}' not found in empty {name} dict",
+            "",
+            f"In {package_fpath}:",
+        ]
+        for line in _format_dict_block(name, value):
+            lines.append(f"  {line}")
+        raise ghrel.errors.GhrelError(
+            message="\n".join(lines),
+            hint=(
+                f"Add a '{platform_key}' key with a wildcard match, "
+                f"like {{'{platform_key}': '*'}}. Because '*' can match multiple "
+                f"assets, run sync again and pick a more specific pattern if "
+                f"you get a multiple-assets error."
+            ),
+        )
 
-    matches = []
-    for asset in assets:
-        name = asset.name.lower()
-        if not _matches_any(name, os_keys):
-            continue
-        if not _matches_any(name, arch_keys):
-            continue
-        matches.append(asset)
+    if platform_key in value:
+        return value[platform_key]
 
-    return tuple(matches)
+    closest = _get_closest_matches(platform_key, tuple(value))
+    closest_str = ", ".join(closest) if closest else "(none)"
+
+    lines = [
+        f"Platform '{platform_key}' not found in {name} dict",
+        "",
+        f"In {package_fpath}:",
+    ]
+    for line in _format_dict_block(name, value):
+        lines.append(f"  {line}")
+    lines.append("")
+    lines.append(f"Closest matches: {closest_str}")
+
+    raise ghrel.errors.GhrelError(
+        message="\n".join(lines),
+        hint=f"Add a '{platform_key}' key to the {name} dict.",
+    )
 
 
 @beartype.beartype
-def _matches_any(name: str, keys: tuple[str, ...]) -> bool:
-    """Return True if name contains any of the keys."""
-    for key in keys:
-        if key in name:
-            return True
-    return False
+def _format_dict_block(name: str, value: dict[str, str]) -> tuple[str, ...]:
+    """Format a dict block for error messages."""
+    if not value:
+        return (f"{name} = {{}}",)
+
+    lines = [f"{name} = {{"]
+    for key in sorted(value):
+        lines.append(f"    {key!r}: {value[key]!r},")
+    lines.append("}")
+    return tuple(lines)
+
+
+@beartype.beartype
+def _get_closest_matches(
+    target: str, keys: tuple[str, ...], limit: int = 2
+) -> tuple[str, ...]:
+    """Return the closest matches by edit distance."""
+    if not keys:
+        return ()
+
+    scored = sorted(
+        ((_levenshtein(target, key), key) for key in keys),
+        key=lambda item: (item[0], item[1]),
+    )
+    return tuple(key for _, key in scored[:limit])
+
+
+@beartype.beartype
+def _levenshtein(left: str, right: str) -> int:
+    """Compute Levenshtein edit distance."""
+    if left == right:
+        return 0
+    if not left:
+        return len(right)
+    if not right:
+        return len(left)
+
+    previous = list(range(len(right) + 1))
+    for i, left_char in enumerate(left, start=1):
+        current = [i]
+        for j, right_char in enumerate(right, start=1):
+            insert_cost = current[j - 1] + 1
+            delete_cost = previous[j] + 1
+            replace_cost = previous[j - 1] + (left_char != right_char)
+            current.append(min(insert_cost, delete_cost, replace_cost))
+        previous = current
+    return previous[-1]
 
 
 @beartype.beartype
@@ -176,15 +275,15 @@ def _require_single_match(
         )
 
     if len(matches) > 1:
-        names = ", ".join(asset.name for asset in matches)
+        names = _format_asset_matches(matches)
         if pattern:
-            message = f"Multiple assets match '{pattern}' for {pkg} {version}: {names}"
+            message = f"Multiple assets match '{pattern}' for {pkg} {version}:\n{names}"
             raise ghrel.errors.GhrelError(
                 message=message,
                 hint="Make the pattern more specific.",
             )
         raise ghrel.errors.GhrelError(
-            message=f"Multiple assets match platform for {pkg} {version}: {names}",
+            message=f"Multiple assets match platform for {pkg} {version}:\n{names}",
             hint="Set an explicit asset pattern in the package file.",
         )
 
@@ -203,7 +302,28 @@ def _find_binary(
             message=f"Missing binary for archive {archive_fpath}",
         )
 
-    if "/" in binary or "\\" in binary:
+    has_wildcard = "*" in binary or "?" in binary
+    has_path = "/" in binary or "\\" in binary
+
+    if has_wildcard:
+        matches = _match_binary_patterns(
+            extracted_dpath, binary, match_basename_only=not has_path
+        )
+        if not matches:
+            entries = ghrel.archive.list_archive_entries(archive_fpath)
+            raise ghrel.errors.GhrelError(
+                message=f"Binary '{binary}' not found in archive for {archive_fpath}",
+                hint=_make_binary_not_found_hint(binary, entries),
+            )
+        if len(matches) > 1:
+            matches_str = _format_binary_matches(matches, extracted_dpath)
+            raise ghrel.errors.GhrelError(
+                message=f"Binary '{binary}' matched multiple files: {matches_str}",
+                hint="Use an explicit path for the binary in the package file.",
+            )
+        return matches[0]
+
+    if has_path:
         binary_fpath = extracted_dpath / pathlib.PurePosixPath(binary)
         if binary_fpath.exists():
             return binary_fpath
@@ -226,7 +346,7 @@ def _find_binary(
         )
 
     if len(matches) > 1:
-        matches_str = ", ".join(str(match) for match in matches)
+        matches_str = _format_binary_matches(matches, extracted_dpath)
         raise ghrel.errors.GhrelError(
             message=f"Binary '{binary}' matched multiple files: {matches_str}",
             hint="Use an explicit path for the binary in the package file.",
@@ -262,10 +382,7 @@ def get_install_as(
     """Determine installed binary name."""
     if package.install_as:
         return package.install_as
-    if not package.archive:
-        return pathlib.PurePosixPath(asset.name).name
-    assert package.binary is not None
-    return pathlib.PurePosixPath(package.binary).name
+    return package.name
 
 
 @beartype.beartype
@@ -285,11 +402,62 @@ def _format_archive_entries(entries: tuple[str, ...]) -> str:
 
 
 @beartype.beartype
+def _format_asset_matches(matches: tuple[ghrel.github.ReleaseAsset, ...]) -> str:
+    """Format asset matches for error output."""
+    if not matches:
+        return "  - (none)"
+    lines = "\n  - ".join(asset.name for asset in matches)
+    return f"  - {lines}"
+
+
+@beartype.beartype
+def _format_binary_matches(
+    matches: list[pathlib.Path], extracted_dpath: pathlib.Path
+) -> str:
+    """Format binary matches for error output."""
+    if not matches:
+        return "  - (none)"
+    lines = "\n  - ".join(
+        _format_match_path(match, extracted_dpath) for match in matches
+    )
+    return f"\n  - {lines}"
+
+
+@beartype.beartype
+def _format_match_path(match: pathlib.Path, extracted_dpath: pathlib.Path) -> str:
+    """Return a match path relative to the extracted directory."""
+    try:
+        rel_path = match.relative_to(extracted_dpath)
+    except ValueError:
+        rel_path = match
+    return rel_path.as_posix()
+
+
+@beartype.beartype
+def _match_binary_patterns(
+    extracted_dpath: pathlib.Path,
+    pattern: str,
+    *,
+    match_basename_only: bool,
+) -> list[pathlib.Path]:
+    """Return files matching a wildcard pattern."""
+    matches = []
+    for match in extracted_dpath.rglob("*"):
+        if not match.is_file():
+            continue
+        target = (
+            match.name
+            if match_basename_only
+            else _format_match_path(match, extracted_dpath)
+        )
+        if fnmatch.fnmatch(target, pattern):
+            matches.append(match)
+    return matches
+
+
+@beartype.beartype
 def _make_binary_not_found_hint(binary: str, entries: tuple[str, ...]) -> str:
     """Build a hint with archive contents and explicit path guidance."""
     entries_str = _format_archive_entries(entries)
-    suggestion = (
-        f'Set binary to an explicit path like "<dir>/{binary}"; '
-        f'you can use a wildcard like "<dir>*/{binary}" to avoid version pinning.'
-    )
+    suggestion = f"Set binary to a dict with your platform key, for example binary = {{'linux-x86_64': '<dir>/{binary}'}} (replace linux-x86_64 with your platform). You can use a wildcard like {{'linux-x86_64': '<dir>*/{binary}'}} to avoid version pinning."  # noqa: E501
     return f"{entries_str}\n{suggestion}"

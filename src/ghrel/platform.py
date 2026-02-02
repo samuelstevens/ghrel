@@ -59,3 +59,11 @@ def get_arch_keys(arch: str) -> tuple[str, ...]:
         message=f"Unsupported architecture: {arch}",
         hint="ghrel supports x86_64 and arm64 only.",
     )
+
+
+@beartype.beartype
+def get_platform_key(os_name: str, arch: str) -> str:
+    """Return platform key string for dict lookups."""
+    _ = get_os_keys(os_name)
+    _ = get_arch_keys(arch)
+    return f"{os_name}-{arch}"

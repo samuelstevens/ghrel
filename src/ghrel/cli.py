@@ -66,6 +66,7 @@ class PackagePlan:
     desired_version: str
     release: ghrel.github.Release
     asset: ghrel.github.ReleaseAsset
+    binary_pattern: str | None
     install_fpath: pathlib.Path
     action: str
     reason: str | None
@@ -177,6 +178,7 @@ def run_sync(cmd: Sync) -> None:
                         package,
                         plan.release,
                         plan.asset,
+                        plan.binary_pattern,
                         bin_dpath,
                         client,
                         temp_dpath=temp_dpath,
@@ -305,6 +307,7 @@ def _make_plan(
     )
     desired_version = release.tag
     asset = ghrel.install.select_asset(package, release, os_name, arch)
+    binary_pattern = ghrel.install.get_binary_pattern(package, os_name, arch)
     install_as = ghrel.install.get_install_as(package, asset)
     install_fpath = bin_dpath / install_as
 
@@ -317,6 +320,7 @@ def _make_plan(
             desired_version=desired_version,
             release=release,
             asset=asset,
+            binary_pattern=binary_pattern,
             install_fpath=install_fpath,
             action="install",
             reason=None,
@@ -332,6 +336,7 @@ def _make_plan(
             desired_version=desired_version,
             release=release,
             asset=asset,
+            binary_pattern=binary_pattern,
             install_fpath=install_fpath,
             action="reinstall",
             reason="binary_path_changed",
@@ -346,6 +351,7 @@ def _make_plan(
             desired_version=desired_version,
             release=release,
             asset=asset,
+            binary_pattern=binary_pattern,
             install_fpath=install_fpath,
             action="update",
             reason=None,
@@ -360,6 +366,7 @@ def _make_plan(
             desired_version=desired_version,
             release=release,
             asset=asset,
+            binary_pattern=binary_pattern,
             install_fpath=install_fpath,
             action="reinstall",
             reason="binary_missing",
@@ -375,6 +382,7 @@ def _make_plan(
             desired_version=desired_version,
             release=release,
             asset=asset,
+            binary_pattern=binary_pattern,
             install_fpath=install_fpath,
             action="reinstall",
             reason="checksum_mismatch",
@@ -388,6 +396,7 @@ def _make_plan(
         desired_version=desired_version,
         release=release,
         asset=asset,
+        binary_pattern=binary_pattern,
         install_fpath=install_fpath,
         action="up_to_date",
         reason=None,
@@ -428,7 +437,7 @@ def _print_plan(
     if not dry_run:
         return
 
-    binary_display = plan.package.binary
+    binary_display = plan.binary_pattern
     if not plan.package.archive:
         binary_display = plan.asset.name
     if not binary_display:
