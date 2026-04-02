@@ -11,6 +11,7 @@ import typing as tp
 import beartype
 
 import ghrel.errors
+import ghrel.platform
 
 
 @tp.runtime_checkable
@@ -297,6 +298,13 @@ def _validate_str_dict(
             raise ghrel.errors.ConfigError(
                 message=f"Invalid key for '{name}' in {package_fpath}",
                 hint="Keys must be strings like 'linux-x86_64'.",
+                path=package_fpath,
+            )
+        if key not in ghrel.platform.VALID_PLATFORM_KEYS:
+            valid_str = ", ".join(sorted(ghrel.platform.VALID_PLATFORM_KEYS))
+            raise ghrel.errors.ConfigError(
+                message=f"Unknown platform key '{key}' for '{name}' in {package_fpath}",
+                hint=f"Valid platform keys are: {valid_str}",
                 path=package_fpath,
             )
         if not isinstance(item, str) or not item:

@@ -44,9 +44,6 @@ select = [
     "UP",     # pyupgrade
 ]
 
-[tool.ruff.format]
-quote-style = "double"
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 timeout = 30

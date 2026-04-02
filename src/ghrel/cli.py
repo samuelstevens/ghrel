@@ -21,7 +21,12 @@ import ghrel.state
 @beartype.beartype
 @dataclasses.dataclass(frozen=True)
 class Sync:
-    """Sync all packages to match package files."""
+    """Sync all packages to match package files.
+
+    Installs missing packages, upgrades outdated ones, and verifies checksums. Packages are .py files in ~/.config/ghrel/packages/ (or XDG_CONFIG_HOME/ghrel/packages/).
+
+    Platform support: packages declare supported platforms via keys in their asset dict (darwin-arm64, darwin-x86_64, linux-arm64, linux-x86_64). If the current platform's key is missing, the package is skipped. This lets you have Linux-only or macOS-only packages in a shared config.
+    """
 
     packages_dpath: tp.Annotated[pathlib.Path | None, tyro.conf.arg(name="path")] = None
     """Custom packages directory."""
@@ -135,8 +140,15 @@ def run_sync(cmd: Sync) -> None:
         for name in sorted(orphans):
             print(f"{name}: WARN orphan (use 'ghrel prune' to remove)")
 
+        platform_key = ghrel.platform.get_platform_key(os_name, arch)
+
         for name in sorted(packages):
             package = packages[name]
+
+            if package.asset and platform_key not in package.asset:
+                print(f"{name}: skipped (no {platform_key} support)")
+                continue
+
             try:
                 plan = _make_plan(
                     package,

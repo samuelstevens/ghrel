@@ -120,7 +120,9 @@ src/ghrel/
 - **Approach**: Direct use of `platform.system()`/`platform.machine()` with normalization
 - **Aliases**: Normalize common variations (e.g., `x86_64` ↔ `amd64`, `arm64` ↔ `aarch64`)
 - **Platform key**: Combine normalized OS and arch into a string like `"linux-x86_64"` for dict lookups
-- **Valid keys**: `darwin-arm64`, `darwin-x86_64`, `linux-arm64`, `linux-x86_64` (fixed set)
+- **Valid keys**: `darwin-arm64`, `darwin-x86_64`, `linux-arm64`, `linux-x86_64` (defined as `VALID_PLATFORM_KEYS` frozenset in `platform.py`)
+- **Key validation**: All keys in `asset` and `binary` dicts are validated against `VALID_PLATFORM_KEYS` at load time. Unknown keys cause a `ConfigError` (catches typos like `darwin-amr64`)
+- **Platform skip**: If `asset` is a non-empty dict and the current platform's key is missing, the package is skipped before any API calls. This avoids wasting rate-limited GitHub requests on unsupported platforms
 
 ### CLI & Output
 
@@ -154,10 +156,10 @@ src/ghrel/
 3. **Ambiguity is an error**: If multiple assets match, fail with error listing all matches. User must make pattern more specific.
 
 **Dict handling**:
-- Keys must be strings matching the pattern `{os}-{arch}` where os ∈ {darwin, linux} and arch ∈ {arm64, x86_64}
+- Keys must be from `VALID_PLATFORM_KEYS` (`darwin-arm64`, `darwin-x86_64`, `linux-arm64`, `linux-x86_64`). Unknown keys are rejected at load time.
 - Values must be non-empty strings (validated at load time)
-- Only the current platform's key is validated at runtime—typos in other keys go unnoticed until someone runs on that platform
-- If current platform key missing: error with two closest matches (Levenshtein distance) and suggestion to add the key
+- If current platform key missing from non-empty `asset` dict: package is skipped (not an error). Skip check happens in the sync loop before any API calls.
+- If current platform key missing from `binary` dict (when `asset` key is present): error with two closest matches (Levenshtein distance) and suggestion to add the key
 - Empty dict: treated as missing key error at sync time
 
 **Binary dict handling**:
@@ -261,27 +263,35 @@ Use actual platform in integration tests for realistic coverage.
 from dataclasses import dataclass
 from pathlib import Path
 
+
 @dataclass
 class SyncCommand:
     """Sync all packages to match package files."""
+
     path: Path | None = None  # Custom packages directory
-    dry_run: bool = False     # Show what would change
-    verbose: bool = False     # Detailed output
+    dry_run: bool = False  # Show what would change
+    verbose: bool = False  # Detailed output
+
 
 @dataclass
 class ListCommand:
     """Show installed packages and their status."""
+
     verbose: bool = False
+
 
 @dataclass
 class PruneCommand:
     """Remove orphaned binaries."""
+
     dry_run: bool = False
     verbose: bool = False
+
 
 @dataclass
 class CLI:
     """ghrel - GitHub Releases Package Manager"""
+
     command: SyncCommand | ListCommand | PruneCommand
 ```
 

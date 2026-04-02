@@ -6,6 +6,13 @@ import beartype
 
 import ghrel.errors
 
+VALID_PLATFORM_KEYS: frozenset[str] = frozenset({
+    "darwin-arm64",
+    "darwin-x86_64",
+    "linux-arm64",
+    "linux-x86_64",
+})
+
 
 @beartype.beartype
 def get_os() -> str:

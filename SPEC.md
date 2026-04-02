@@ -61,17 +61,27 @@ When `asset` or `binary` is omitted, ghrel defaults to `{}` and fails with a mis
 import subprocess
 
 pkg = "BurntSushi/ripgrep"
-binary = {                             # executable path in archive (can be path, see below)
+binary = {  # executable path in archive (can be path, see below)
     "linux-x86_64": "rg",
 }
-install_as = "rg"                      # name in ~/.local/bin (optional, defaults to package name)
-asset = {                              # glob pattern for asset selection (optional)
+install_as = "rg"  # name in ~/.local/bin (optional, defaults to package name)
+asset = {  # glob pattern for asset selection (optional)
     "linux-x86_64": "*x86_64*linux*musl*.tar.gz",
 }
-version = "14.1.0"                     # pin to exact version (optional, default: latest)
-archive = True                         # whether asset is an archive (optional, default: True)
+version = "14.1.0"  # pin to exact version (optional, default: latest)
+archive = True  # whether asset is an archive (optional, default: True)
 
-def ghrel_post_install(*, version: str, bin_name: str, bin_path: Path, checksum: str, pkg: str, bin_dir: Path, extracted_dir: Path):
+
+def ghrel_post_install(
+    *,
+    version: str,
+    bin_name: str,
+    bin_path: Path,
+    checksum: str,
+    pkg: str,
+    bin_dir: Path,
+    extracted_dir: Path,
+):
     """Called after binary is installed, before verify. Optional."""
     import shutil
 
@@ -81,6 +91,7 @@ def ghrel_post_install(*, version: str, bin_name: str, bin_path: Path, checksum:
         dest = Path.home() / ".zsh" / "completions" / "_rg"
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(completions, dest)
+
 
 def ghrel_verify(*, version: str, bin_name: str):
     """Called after post_install to verify the binary works. Optional but recommended."""
@@ -112,7 +123,9 @@ When `asset` or `binary` is a dict, keys must be one of these platform strings:
 | `linux-arm64` | Linux | ARM64/AArch64 |
 | `linux-x86_64` | Linux | x86-64/AMD64 |
 
-Keys are matched exactly—no normalization (e.g., `linux-amd64` is not valid, use `linux-x86_64`).
+Keys are matched exactly—no normalization (e.g., `linux-amd64` is not valid, use `linux-x86_64`). Unknown keys are rejected at load time with an error listing the valid keys.
+
+**Platform-specific packages**: If the current platform's key is missing from a non-empty `asset` dict, the package is skipped (not an error). This lets you write packages that only apply to certain platforms—for example, a Linux-only tool is silently skipped on macOS. An empty `asset = {}` is still an error (it means you forgot to fill it in).
 
 **Example cross-platform package**:
 
@@ -134,9 +147,9 @@ binary = {
 }
 ```
 
-**Strings are not allowed**: `asset` and `binary` must be dicts keyed by platform. Missing platform keys fail with a helpful error.
+**Strings are not allowed**: `asset` and `binary` must be dicts keyed by platform.
 
-When both `asset` and `binary` are dicts, only the current platform's key must exist in both - other keys can differ.
+When both `asset` and `binary` are dicts, only the current platform's key must exist in both—other keys can differ. If `asset` has the current platform's key but `binary` doesn't (for an archive package), that's an error.
 
 ### Hook Functions
 
@@ -333,7 +346,7 @@ Set `archive = False` to handle these:
 ```python
 pkg = "some/tool"
 asset = {"linux-x86_64": "*linux*amd64*"}
-archive = False           # asset IS the binary, not an archive
+archive = False  # asset IS the binary, not an archive
 ```
 
 When `archive = False`:
@@ -433,6 +446,7 @@ fd: ok (verified)
 fzf: ok (no verify hook)
 ripgrep: installed 14.1.0 (verified)
 lazygit: installed 0.40.0 (no verify hook)
+turm: skipped (no darwin-arm64 support)
 bat: ⚠ orphan (use 'ghrel prune' to remove)
 delta: ⚠ binary missing, re-downloading
 
@@ -450,7 +464,9 @@ delta: ⚠ binary missing, re-downloading
 - **Package file load errors**: If any package file fails to load (`SyntaxError`, `ImportError`, or missing required attributes), ghrel exits immediately. This catches config mistakes early.
 - **Continue on processing errors**: Once packages are loaded, each is processed independently. Hook failures, network errors, and asset issues don't stop other packages.
 - **Summary at end**: Failed packages are listed with error messages after sync completes.
-- **Missing platform key**: If `asset` or `binary` is a dict and the current platform's key is missing, fails with helpful error (see below).
+- **Unknown platform keys**: If `asset` or `binary` dict contains a key not in the valid set (`darwin-arm64`, `darwin-x86_64`, `linux-arm64`, `linux-x86_64`), ghrel exits immediately with an error listing the valid keys. This catches typos like `darwin-amr64`.
+- **Missing platform key in `asset`**: If `asset` is a non-empty dict and the current platform's key is missing, the package is skipped (not an error). Skipped packages are not counted as failures.
+- **Missing platform key in `binary`**: If `asset` has the current platform's key but `binary` doesn't (for archive packages), that's an error.
 - **Empty dict**: If `asset` or `binary` is an empty dict, fails at sync time with "platform not found in empty dict" error.
 - **Invalid dict values**: If dict values are not non-empty strings, fails at load time.
 - **Ambiguous asset**: Fails if multiple assets match pattern - lists matching assets.
@@ -533,6 +549,7 @@ binary = {
     "linux-x86_64": "ripgrep-*-x86_64-unknown-linux-musl/rg",
 }
 
+
 def ghrel_verify(*, version: str, bin_name: str):
     result = subprocess.run([bin_name, "--version"], capture_output=True, text=True)
     assert result.returncode == 0
@@ -558,7 +575,17 @@ from pathlib import Path
 pkg = "sharkdp/fd"
 binary = {"darwin-arm64": "fd-*-aarch64-apple-darwin/fd"}
 
-def ghrel_post_install(*, version: str, bin_name: str, bin_path: Path, checksum: str, pkg: str, bin_dir: Path, extracted_dir: Path):
+
+def ghrel_post_install(
+    *,
+    version: str,
+    bin_name: str,
+    bin_path: Path,
+    checksum: str,
+    pkg: str,
+    bin_dir: Path,
+    extracted_dir: Path,
+):
     import shutil
 
     # fd includes completions in autocomplete/
@@ -567,6 +594,7 @@ def ghrel_post_install(*, version: str, bin_name: str, bin_path: Path, checksum:
         dest = Path.home() / ".zsh" / "completions" / "_fd"
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(src, dest)
+
 
 def ghrel_verify(*, version: str, bin_name: str):
     result = subprocess.run([bin_name, "--version"], capture_output=True, text=True)
@@ -591,6 +619,17 @@ binary = {"linux-x86_64": "ripgrep-14.1.0-x86_64-unknown-linux-musl/rg"}
 install_as = "rg"
 asset = {"linux-x86_64": "*x86_64*linux*musl*.tar.gz"}
 ```
+
+### Platform-specific (turm, Linux only)
+
+```python
+# turm.py -- skipped on macOS (slurm is Linux-only)
+pkg = "lemnos/turm"
+asset = {"linux-x86_64": "*linux*amd64*"}
+binary = {"linux-x86_64": "turm"}
+```
+
+On macOS, `ghrel sync` prints `turm: skipped (no darwin-arm64 support)` and moves on.
 
 ### Multiple binaries from one repo (pi-mono)
 
