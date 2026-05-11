@@ -133,6 +133,16 @@ class GitHubClient:
                 fd.write(chunk)
 
     @beartype.beartype
+    def download_release_asset(
+        self, asset: ReleaseAsset, dest_fpath: pathlib.Path
+    ) -> None:
+        """Download a release asset using the right URL for the auth mode."""
+        url = asset.url
+        if self._token and asset.api_url:
+            url = asset.api_url
+        self.download_asset(url, dest_fpath)
+
+    @beartype.beartype
     def _request_json(
         self, url: str, params: dict[str, str] | None = None
     ) -> dict[str, object] | list[object]:
