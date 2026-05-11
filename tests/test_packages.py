@@ -178,3 +178,55 @@ def test_load_packages_rejects_asset_dict_bad_key(
 
     with pytest.raises(ghrel.errors.ConfigError, match="Invalid key for 'asset'"):
         ghrel.packages.load_packages(packages_dpath)
+
+
+def test_load_packages_rejects_unknown_asset_platform_key(
+    tmp_path: pathlib.Path,
+) -> None:
+    """load_packages rejects unknown platform keys in asset dict."""
+    packages_dpath = tmp_path / "packages"
+    packages_dpath.mkdir()
+    (packages_dpath / "tool.py").write_text(
+        "pkg = 'owner/repo'\nasset = {'darwin-amr64': '*darwin*'}\n"
+    )
+
+    with pytest.raises(
+        ghrel.errors.ConfigError, match="Unknown platform key 'darwin-amr64'"
+    ):
+        ghrel.packages.load_packages(packages_dpath)
+
+
+def test_load_packages_rejects_unknown_binary_platform_key(
+    tmp_path: pathlib.Path,
+) -> None:
+    """load_packages rejects unknown platform keys in binary dict."""
+    packages_dpath = tmp_path / "packages"
+    packages_dpath.mkdir()
+    (packages_dpath / "tool.py").write_text(
+        "pkg = 'owner/repo'\nbinary = {'linux-amd64': 'tool'}\n"
+    )
+
+    with pytest.raises(
+        ghrel.errors.ConfigError, match="Unknown platform key 'linux-amd64'"
+    ):
+        ghrel.packages.load_packages(packages_dpath)
+
+
+def test_load_packages_accepts_all_valid_platform_keys(
+    tmp_path: pathlib.Path,
+) -> None:
+    """load_packages accepts all four valid platform keys."""
+    packages_dpath = tmp_path / "packages"
+    packages_dpath.mkdir()
+    (packages_dpath / "tool.py").write_text(
+        "pkg = 'owner/repo'\n"
+        "asset = {\n"
+        "    'darwin-arm64': '*darwin*arm64*',\n"
+        "    'darwin-x86_64': '*darwin*x86_64*',\n"
+        "    'linux-arm64': '*linux*arm64*',\n"
+        "    'linux-x86_64': '*linux*x86_64*',\n"
+        "}\n"
+    )
+
+    packages = ghrel.packages.load_packages(packages_dpath)
+    assert len(packages["tool"].asset) == 4

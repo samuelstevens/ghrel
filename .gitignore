@@ -9,3 +9,6 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Mutation testing (cosmic-ray)
+session.sqlite

@@ -19,6 +19,7 @@ Technical decisions and implementation notes for the ghrel package manager.
 | Type Checker | ty (Astral's new type checker) |
 | Formatter/Linter | ruff |
 | Test Framework | pytest + pytest-cov + pytest-timeout |
+| Mutation Testing | cosmic-ray |
 
 ## Dependencies
 
@@ -39,6 +40,7 @@ Technical decisions and implementation notes for the ghrel package manager.
 | pytest-timeout | Protection against hanging tests |
 | ruff | Formatting and linting |
 | ty | Type checking |
+| cosmic-ray | Mutation testing (not mutmut -- mutmut's trampoline approach is incompatible with beartype decorators) |
 
 ## Module Structure
 

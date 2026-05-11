@@ -15,6 +15,73 @@ import ghrel.packages
 import ghrel.state
 
 
+def test_run_sync_skips_package_with_missing_platform_key(
+    tmp_path: pathlib.Path, monkeypatch, capsys
+) -> None:
+    """run_sync skips packages whose asset dict lacks the current platform key."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    monkeypatch.setenv("GHREL_BIN", str(tmp_path / "bin"))
+    monkeypatch.setenv("GHREL_NO_TOKEN_WARNING", "1")
+
+    packages_dpath = tmp_path / "ghrel" / "packages"
+    packages_dpath.mkdir(parents=True)
+
+    # This package only supports linux-x86_64, so it should be skipped on the
+    # current platform if it's not linux-x86_64 (and vice versa).
+    import ghrel.platform
+
+    current_key = ghrel.platform.get_platform_key(
+        ghrel.platform.get_os(), ghrel.platform.get_arch()
+    )
+    # Pick a different platform key to ensure skip
+    other_key = "linux-x86_64" if current_key != "linux-x86_64" else "darwin-arm64"
+
+    (packages_dpath / "turm.py").write_text(
+        f"pkg = 'lemnos/turm'\n"
+        f"asset = {{'{other_key}': '*linux*'}}\n"
+        f"binary = {{'{other_key}': 'turm'}}\n"
+    )
+
+    # Should not make any API calls, so no mocking needed
+    cmd = ghrel.cli.Sync(packages_dpath=packages_dpath, dry_run=False, verbose=False)
+    ghrel.cli.run_sync(cmd)
+    output = capsys.readouterr().out
+    assert f"turm: skipped (no {current_key} support)" in output
+    assert "Failed" not in output
+
+
+def test_run_sync_skip_shown_in_dry_run(
+    tmp_path: pathlib.Path, monkeypatch, capsys
+) -> None:
+    """run_sync --dry-run also shows skipped packages."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    monkeypatch.setenv("GHREL_BIN", str(tmp_path / "bin"))
+    monkeypatch.setenv("GHREL_NO_TOKEN_WARNING", "1")
+
+    packages_dpath = tmp_path / "ghrel" / "packages"
+    packages_dpath.mkdir(parents=True)
+
+    import ghrel.platform
+
+    current_key = ghrel.platform.get_platform_key(
+        ghrel.platform.get_os(), ghrel.platform.get_arch()
+    )
+    other_key = "linux-x86_64" if current_key != "linux-x86_64" else "darwin-arm64"
+
+    (packages_dpath / "turm.py").write_text(
+        f"pkg = 'lemnos/turm'\n"
+        f"asset = {{'{other_key}': '*linux*'}}\n"
+        f"binary = {{'{other_key}': 'turm'}}\n"
+    )
+
+    cmd = ghrel.cli.Sync(packages_dpath=packages_dpath, dry_run=True, verbose=False)
+    ghrel.cli.run_sync(cmd)
+    output = capsys.readouterr().out
+    assert f"turm: skipped (no {current_key} support)" in output
+
+
 def test_run_prune_errors_on_missing_packages_dir(
     tmp_path: pathlib.Path, monkeypatch
 ) -> None:

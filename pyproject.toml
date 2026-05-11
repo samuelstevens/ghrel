@@ -24,6 +24,7 @@ build-backend = "hatchling.build"
 [dependency-groups]
 dev = [
     "hypothesis>=6.0.0",
+    "cosmic-ray>=8.0.0",
     "pytest>=8.0.0",
     "pytest-cov>=4.1.0",
     "pytest-timeout>=2.2.0",
@@ -47,3 +48,34 @@ select = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 timeout = 30
+
+[cosmic-ray]
+module-path = "src/ghrel"
+timeout = 30
+test-command = "uv run pytest -x --timeout=10 -q"
+
+[cosmic-ray.distributor]
+name = "http"
+
+[cosmic-ray.distributor.http]
+worker-urls = [
+    "http://localhost:9100",
+    "http://localhost:9101",
+    "http://localhost:9102",
+    "http://localhost:9103",
+    "http://localhost:9104",
+    "http://localhost:9105",
+    "http://localhost:9106",
+    "http://localhost:9107",
+]
+
+# Exclude operators that produce noise, not signal:
+# - RemoveDecorator: beartype decorators don't test behavior
+# - BitOr replacements: mutates | in type unions (str | None), trivially killed
+# - Div replacements: mutates / in Path operations (Path / "x"), trivially killed
+[cosmic-ray.filters.operators-filter]
+exclude-operators = [
+    "core/RemoveDecorator",
+    "core/ReplaceBinaryOperator_BitOr_.*",
+    "core/ReplaceBinaryOperator_Div_.*",
+]
