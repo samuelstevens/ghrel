@@ -120,7 +120,7 @@ def install_release_asset(
     assert temp_dpath is not None
     temp_dpath.mkdir(parents=True, exist_ok=True)
     asset_fpath = temp_dpath / asset.name
-    client.download_asset(asset.url, asset_fpath)
+    client.download_asset(asset.api_url or asset.url, asset_fpath)
 
     extracted_dpath: pathlib.Path | None = None
     source_fpath = asset_fpath

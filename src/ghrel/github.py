@@ -21,6 +21,7 @@ class ReleaseAsset:
 
     name: str
     url: str
+    api_url: str | None = None
 
 
 @beartype.beartype
@@ -224,10 +225,13 @@ def _parse_release(data: dict[str, object]) -> Release:
             continue
         asset_data = tp.cast(dict[str, object], asset)
         name = asset_data.get("name")
-        url = asset_data.get("browser_download_url")
-        if not isinstance(name, str) or not isinstance(url, str):
+        api_url = asset_data.get("url")
+        browser_url = asset_data.get("browser_download_url")
+        if not isinstance(name, str) or not isinstance(api_url, str):
             continue
-        assets.append(ReleaseAsset(name=name, url=url))
+        if not isinstance(browser_url, str):
+            browser_url = api_url
+        assets.append(ReleaseAsset(name=name, url=browser_url, api_url=api_url))
 
     return Release(tag=tag, assets=tuple(assets))
 

@@ -23,9 +23,12 @@ import ghrel.state
 class Sync:
     """Sync all packages to match package files.
 
-    Installs missing packages, upgrades outdated ones, and verifies checksums. Packages are .py files in ~/.config/ghrel/packages/ (or XDG_CONFIG_HOME/ghrel/packages/).
+    Installs missing packages, upgrades outdated ones, and verifies checksums.
 
-    Platform support: packages declare supported platforms via keys in their asset dict (darwin-arm64, darwin-x86_64, linux-arm64, linux-x86_64). If the current platform's key is missing, the package is skipped. This lets you have Linux-only or macOS-only packages in a shared config.
+    Packages are .py files in the ghrel package config directory.
+
+    Platform support is declared via asset dict keys. If the current platform key
+    is missing, the package is skipped.
     """
 
     packages_dpath: tp.Annotated[pathlib.Path | None, tyro.conf.arg(name="path")] = None
@@ -281,7 +284,7 @@ def run_prune(cmd: Prune) -> None:
 @beartype.beartype
 def main() -> None:
     """Main entry point."""
-    command = tyro.cli(Sync | List | Prune)  # type: ignore[arg-type]
+    command = tyro.cli(Sync | List | Prune)  # ty:ignore[no-matching-overload]
 
     try:
         match command:
