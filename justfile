@@ -23,8 +23,16 @@ mutate:
     uv run python -m cosmic_ray.tools.filters.operators_filter session.sqlite pyproject.toml
     uv run cr-http-workers pyproject.toml . &
     worker_pid=$!
+    kill_tree() {
+        local pid="$1"
+        local child
+        for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+            kill_tree "$child"
+        done
+        kill "$pid" 2>/dev/null || true
+    }
     cleanup() {
-        kill "$worker_pid" 2>/dev/null || true
+        kill_tree "$worker_pid"
         wait "$worker_pid" 2>/dev/null || true
     }
     trap cleanup EXIT
