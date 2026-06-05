@@ -202,6 +202,7 @@ Behavior:
 - Verifies checksums of installed binaries (re-downloads if mismatch detected)
 - Re-downloads if binary file is missing (warns about state drift)
 - Runs `ghrel_verify` on every sync (installs, updates, and up-to-date packages)
+- Summarizes up-to-date packages whose `ghrel_verify` hooks passed as `N package(s) up-to-date and verified`
 - Shows `(no verify hook)` warning for packages without `ghrel_verify` on every sync
 - **Warns** about orphaned binaries (installed but no package file) - use `ghrel prune` to remove
 - Continues on error - failures are reported in summary at end
@@ -442,9 +443,8 @@ ghrel sync
 ⚠ No GITHUB_TOKEN set. API rate limited to 60 requests/hour.
   Set GITHUB_TOKEN to increase limit to 5,000/hour.
 
-fd: ok (verified)
-fzf: ok (no verify hook)
 ripgrep: installed 14.1.0 (verified)
+fzf: ok (up to date) (no verify hook)
 lazygit: installed 0.40.0 (no verify hook)
 turm: skipped (no darwin-arm64 support)
 bat: ⚠ orphan (use 'ghrel prune' to remove)
@@ -452,12 +452,15 @@ delta: ⚠ binary missing, re-downloading
 
 ✗ 1 failed:
   jq: installed 1.7.1 (verify failed: expected 'jq' in output)
+1 package up-to-date and verified
 ```
 
-**Verify status** is always shown:
+**Verify status** is shown for installs, updates, reinstalls, failures, and packages that need attention:
 - `(verified)` - verify hook ran and passed
 - `(no verify hook)` - package has no `ghrel_verify` function (soft warning, doesn't affect exit code)
 - `(verify failed: <message>)` - verify hook raised an exception
+
+Up-to-date packages with passing verify hooks are not printed individually. They are counted in the final `N package(s) up-to-date and verified` summary.
 
 ## Error Handling
 

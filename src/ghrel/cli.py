@@ -134,6 +134,7 @@ def run_sync(cmd: Sync) -> None:
     bin_dpath = ghrel.install.get_bin_dpath()
 
     failures: list[tuple[str, str]] = []
+    up_to_date_verified_count = 0
 
     with ghrel.state.acquire_lock():
         state = ghrel.state.read_state()
@@ -182,6 +183,9 @@ def run_sync(cmd: Sync) -> None:
                 verify_status, _ = _get_verify_status_existing(
                     package, plan, plan.current_state, failures
                 )
+                if verify_status == "verified":
+                    up_to_date_verified_count += 1
+                    continue
                 _print_plan(plan, dry_run=False, verify_status=verify_status)
                 continue
 
@@ -228,6 +232,10 @@ def run_sync(cmd: Sync) -> None:
             print(f"Failed: {len(failures)} package(s)")
             for name, message in failures:
                 print(f"  {name}: {message}")
+
+        if up_to_date_verified_count:
+            package_word = "package" if up_to_date_verified_count == 1 else "packages"
+            print(f"{up_to_date_verified_count} {package_word} up-to-date and verified")
 
 
 @beartype.beartype

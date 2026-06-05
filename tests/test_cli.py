@@ -293,7 +293,8 @@ def test_run_sync_verifies_up_to_date_package(
     ghrel.cli.run_sync(cmd)
     assert marker_fpath.exists()
     output = capsys.readouterr().out
-    assert "tool: ok (up to date) (verified)" in output
+    assert "tool: ok (up to date) (verified)" not in output
+    assert "1 package up-to-date and verified" in output
 
 
 def test_run_sync_warns_no_verify_hook_up_to_date(
