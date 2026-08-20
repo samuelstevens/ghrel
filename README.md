@@ -11,3 +11,9 @@ Package files are written in Python.
 Notes:
 - `binary` defaults to the package filename stem when omitted (for archive assets).
 - `ghrel_verify` runs on fresh installs, updates, and when a package is already up to date.
+
+## Installation
+
+```sh
+uv tool install git+https://github.com/samuelstevens/ghrel
+```
